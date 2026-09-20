@@ -18,3 +18,4 @@ View your app in AI Studio: https://ai.studio/apps/848fe257-d978-4790-9634-794c5
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+# pawpules
