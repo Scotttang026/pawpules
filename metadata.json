@@ -1,0 +1,6 @@
+{
+  "name": "PawPulse",
+  "description": "流浪動物即時通報與 AI 智慧救援媒合平台，快速辨識傷病狀況並自動配對鄰近合適 NGO。",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
