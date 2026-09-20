@@ -1,16 +1,16 @@
-# 階段 1: Build 階段 (安裝套件並編譯 TypeScript / Vite)
+# 階段 1: Build 階段 (編譯 React 前端與 Node.js 後端)
 FROM node:20-slim AS builder
 WORKDIR /app
 
-# 複製 package 檔案並安裝全套依賴
+# 1. 複製 package 檔並執行一般安裝 (自動容許無 package-lock.json)
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
-# 複製其餘原始碼並進行 build
+# 2. 複製剩餘原始碼並進行編譯打包
 COPY . .
 RUN npm run build
 
-# 階段 2: Runner 階段 (正式上線輕量化環境)
+# 階段 2: Runner 階段 (輕量化 Cloud Run 執行環境)
 FROM node:20-slim AS runner
 WORKDIR /app
 
