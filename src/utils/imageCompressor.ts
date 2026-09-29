@@ -73,20 +73,28 @@ export async function compressImage(
   });
 }
 
+export interface PhotoUploadResult {
+  downloadUrl: string;
+  storagePath: string;
+}
+
 /**
  * Uploads a compressed image blob to Firebase Cloud Storage.
- * Returns public download URL. If cloud storage upload fails, returns dataUrl fallback.
+ * Links the upload with the Case ID.
+ * Returns public download URL and storage path.
  */
 export async function uploadAnimalPhoto(
   blob: Blob,
   caseId: string,
   fallbackDataUrl?: string
-): Promise<string> {
+): Promise<PhotoUploadResult> {
+  const timestamp = Date.now();
+  const safeCaseId = (caseId || `PW-${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '');
+  const storagePath = `animal-reports/${safeCaseId}_${timestamp}.jpg`;
+
+  // Attempt 1: Direct Firebase Cloud Storage upload
   try {
-    const timestamp = Date.now();
-    const safeCaseId = caseId.replace(/[^a-zA-Z0-9_-]/g, '');
-    const storageRef = ref(storage, `animal-reports/${safeCaseId}_${timestamp}.jpg`);
-    
+    const storageRef = ref(storage, storagePath);
     const snapshot = await uploadBytes(storageRef, blob, {
       contentType: 'image/jpeg',
       customMetadata: {
@@ -96,9 +104,38 @@ export async function uploadAnimalPhoto(
     });
 
     const downloadUrl = await getDownloadURL(snapshot.ref);
-    return downloadUrl;
+    return { downloadUrl, storagePath };
   } catch (storageError) {
-    console.warn('Firebase Storage upload failed or not configured, using compressed image fallback:', storageError);
-    return fallbackDataUrl || '';
+    console.warn('Direct Firebase Storage upload not permitted or unauthenticated, attempting server upload proxy:', storageError);
   }
+
+  // Attempt 2: Server-side persistent upload route (/api/upload-photo)
+  try {
+    if (fallbackDataUrl) {
+      const response = await fetch('/api/upload-photo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: fallbackDataUrl,
+          caseId: safeCaseId,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        return {
+          downloadUrl: result.downloadUrl || fallbackDataUrl,
+          storagePath: result.storagePath || storagePath,
+        };
+      }
+    }
+  } catch (proxyError) {
+    console.warn('Server upload fallback failed:', proxyError);
+  }
+
+  // Fallback to data URL
+  return {
+    downloadUrl: fallbackDataUrl || '',
+    storagePath,
+  };
 }

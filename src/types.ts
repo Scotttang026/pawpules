@@ -46,11 +46,12 @@ export interface NGOOrganization {
 }
 
 export interface StrayReport {
-  id: string;
+  id: string; // Case ID
   title: string;
   animalType: AnimalType;
   customAnimalName?: string;
-  photoUrl: string;
+  photoUrl: string; // Cloud Storage public URL or served URL
+  storagePath?: string; // Cloud Storage object path linked to this case
   location: LocationCoords;
   description: string;
   reporterName: string;
@@ -60,7 +61,8 @@ export interface StrayReport {
   createdAt: string;
   status: CaseStatus;
   urgency: UrgencyLevel;
-  aiAnalysis?: AIAnalysisResult;
+  geminiResponse?: AIAnalysisResult | null; // gemini 回答內容
+  aiAnalysis?: AIAnalysisResult | null;
   matchedNGOs?: NGOOrganization[];
   dispatchedToNGO?: {
     ngoId: string;
@@ -68,6 +70,15 @@ export interface StrayReport {
     dispatchedAt: string;
     status: 'sent' | 'acknowledged' | 'en_route' | 'arrived';
   };
+}
+
+export interface AdminUser {
+  uid: string;
+  email: string;
+  name?: string;
+  role: 'admin' | 'superadmin';
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface UserProfile {

@@ -185,7 +185,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-200'
           }`}
         >
-          Firestore 個案審核 ({reports.length})
+          case 資料表審核 ({reports.length})
         </button>
         <button
           onClick={() => setActiveTab('ngos')}
@@ -195,7 +195,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-200'
           }`}
         >
-          Firestore NGO 機構管理 ({ngos.length})
+          ngodatail 資料表維護 ({ngos.length})
         </button>
         <button
           onClick={() => {
@@ -217,8 +217,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'cases' && (
         <div className="bg-white rounded-3xl border border-stone-200 shadow-xs overflow-hidden">
           <div className="p-4 border-b border-stone-200 bg-stone-50 flex items-center justify-between">
-            <span className="text-xs font-bold text-stone-700">Firestore 實時個案列表</span>
-            <span className="text-2xs text-stone-500">共 {reports.length} 宗個案</span>
+            <span className="text-xs font-bold text-stone-700">Firestore `case` 資料表 (即時同步)</span>
+            <span className="text-2xs text-stone-500 font-mono">Collection: case / 共 {reports.length} 宗</span>
           </div>
 
           {reports.length === 0 ? (
@@ -433,6 +433,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
                   </div>
                   <p className="font-sans font-medium">{log.message}</p>
+                  {log.details && (
+                    <pre className="mt-1.5 p-2 rounded-lg bg-black/40 text-stone-300 text-3xs overflow-x-auto whitespace-pre-wrap">
+                      {typeof log.details === 'string' ? log.details : JSON.stringify(log.details, null, 2)}
+                    </pre>
+                  )}
                 </div>
               ))
             )}

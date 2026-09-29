@@ -26,6 +26,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSignedIn() && (
+        exists(/databases/$(database)/documents/adminuser/$(request.auth.uid)) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         (request.auth.token.email == "scotttang026jp@gmail.com" && request.auth.token.email_verified == true)
       );
@@ -36,14 +37,29 @@ service cloud.firestore {
         data.animalType in ['cat', 'dog', 'bird', 'other'] &&
         data.urgency in ['P0', 'P1', 'P2'] &&
         data.status in ['pending', 'in_progress', 'rescued', 'closed'] &&
-        data.description is string && data.description.size() <= 2000 &&
-        (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 1500)) &&
+        data.description is string && data.description.size() <= 2500 &&
+        (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 2048)) &&
+        (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() <= 256)) &&
         (!('reporterName' in data) || (data.reporterName is string && data.reporterName.size() <= 100)) &&
         (!('reporterEmail' in data) || (data.reporterEmail is string && data.reporterEmail.size() <= 120)) &&
         (!('reporterPhone' in data) || (data.reporterPhone is string && data.reporterPhone.size() <= 50));
     }
 
-    // Cases collection: Public stray reports can be read so rescuers and citizens see live animal needs
+    // 1. Primary "case" table
+    match /case/{caseId} {
+      allow read: if true;
+      allow create: if isValidId(caseId) && isValidCase(incoming());
+      allow update: if isValidId(caseId) && (
+        isAdmin() ||
+        (
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'dispatchedToNGO', 'updatedAt']) &&
+          incoming().status in ['pending', 'in_progress', 'rescued', 'closed']
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Legacy mirror "cases" collection
     match /cases/{caseId} {
       allow read: if true;
       allow create: if isValidId(caseId) && isValidCase(incoming());
@@ -57,15 +73,28 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // NGO directory: readable by everyone, can be created/seeded, updates/deletions restricted to admin
+    // 2. Primary "ngodatail" table
+    match /ngodatail/{ngoId} {
+      allow read: if true;
+      allow create: if isValidId(ngoId) && incoming().name is string;
+      allow update, delete: if isAdmin();
+    }
+
+    // Legacy mirror "ngos" collection
     match /ngos/{ngoId} {
       allow read: if true;
       allow create: if isValidId(ngoId) && incoming().name is string;
       allow update, delete: if isAdmin();
     }
 
-    // Admins collection: registry for role verification
-    match /admins/{adminUid} {
+    // 3. Primary "adminuser" table for backstage administration
+    match /adminuser/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Legacy mirror "admins" collection
+    match /admins/{adminId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }

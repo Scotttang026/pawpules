@@ -328,8 +328,13 @@ function AppContent() {
                 </div>
 
                 {/* AI Analysis Diagnostic Display */}
-                {justSubmittedReport.aiAnalysis && (
+                {justSubmittedReport.aiAnalysis ? (
                   <AIAnalysisCard analysis={justSubmittedReport.aiAnalysis} />
+                ) : (
+                  <div className="bg-stone-50 border border-stone-200 rounded-3xl p-5 text-center text-stone-500 space-y-1">
+                    <p className="text-sm font-bold text-stone-700">Gemini 沒有回應</p>
+                    <p className="text-xs text-stone-400">未能取得 AI 傷病分析報告，個案已妥善存立並直接匹配周邊救助隊。</p>
+                  </div>
                 )}
 
                 {/* Matched NGO Organizations & Emergency Contact Feedback */}

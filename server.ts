@@ -1,5 +1,6 @@
 import express, { Request, Response } from "express";
 import path from "path";
+import fs from "fs";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
@@ -47,12 +48,29 @@ const aiRateLimitMiddleware = async (req: Request, res: Response, next: () => vo
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+// Ensure local uploads directory exists
+const uploadsDir = path.resolve(process.cwd(), "public", "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use("/uploads", express.static(uploadsDir));
+
 // Server-side Gemini AI Client
+function getGeminiApiKey(): string | undefined {
+  return (
+    process.env.GEMINI_API_KEY ||
+    process.env.API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY
+  );
+}
+
 let aiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
+  const apiKey = getGeminiApiKey();
   if (!aiClient) {
     aiClient = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+      apiKey,
       httpOptions: {
         headers: {
           "User-Agent": "aistudio-build",
@@ -66,6 +84,47 @@ function getGeminiClient(): GoogleGenAI {
 // Health check
 app.get("/api/health", (_req: Request, res: Response) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// AI Configuration status check
+app.get("/api/ai/status", (_req: Request, res: Response) => {
+  const key = getGeminiApiKey();
+  res.json({
+    status: key ? "configured" : "missing_key",
+    hasApiKey: !!key,
+    model: "gemini-3.8-flash",
+  });
+});
+
+// Photo Upload Proxy Endpoint
+app.post("/api/upload-photo", (req: Request, res: Response) => {
+  try {
+    const { imageBase64, caseId } = req.body;
+    if (!imageBase64) {
+      res.status(400).json({ error: "Missing imageBase64" });
+      return;
+    }
+
+    const safeCaseId = (caseId || `PW-${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, "");
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const buffer = Buffer.from(cleanBase64, "base64");
+    const filename = `${safeCaseId}_${Date.now()}.jpg`;
+    const filePath = path.join(uploadsDir, filename);
+
+    fs.writeFileSync(filePath, buffer);
+
+    const publicUrl = `/uploads/${filename}`;
+    const storagePath = `animal-reports/${filename}`;
+
+    res.json({
+      success: true,
+      downloadUrl: publicUrl,
+      storagePath,
+    });
+  } catch (err: any) {
+    console.error("Photo upload error:", err);
+    res.status(500).json({ error: err.message || "Failed to save photo" });
+  }
 });
 
 // GET NGOs status (Client directly queries real-time Firestore collection 'ngos')
@@ -124,7 +183,7 @@ Ensure output is strictly JSON conforming to the response schema.
 
     // Attempt Gemini call
     let analysisResult: AIAnalysisResult | null = null;
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = getGeminiApiKey();
 
     if (apiKey) {
       try {
@@ -205,42 +264,18 @@ Ensure output is strictly JSON conforming to the response schema.
           };
         }
       } catch (geminiError) {
-        console.warn("Gemini API call failed or timed out, activating intelligent heuristic analysis:", geminiError);
+        console.warn("Gemini API call failed or timed out:", geminiError);
       }
     }
 
-    // Fallback heuristic if API key is not present or offline
+    // If Gemini API fails, times out, or has no response, do not provide any fixed fallback
     if (!analysisResult) {
-      const isDog = animalTypeHint === "dog" || (description && /狗|唐狗|犬|汪/.test(description));
-      const hasSevereInjury = description && /血|車禍|撞|骨折|不能動|倒地|吐|抽搐/.test(description);
-
-      analysisResult = {
-        identifiedSpecies: isDog ? "犬 (Canis lupus familiaris)" : "貓 (Felis catus)",
-        estimatedBreed: isDog ? "混種唐狗 / 米克斯 (短毛)" : "家養短毛貓 (虎斑/橘白)",
-        appearanceDescription: `由現場照片辨識為成年${isDog ? "犬隻" : "貓咪"}，身形中等，精神緊張警惕，處於戶外流浪環境。`,
-        apparentInjuries: hasSevereInjury
-          ? ["身體部位疑似外傷擦傷", "肢體活動受限，避重就輕", "呼吸稍顯急促"]
-          : ["毛髮打結沾灰，輕度營養缺乏", "眼部少量分泌物", "走失或飢餓跡象"],
-        urgencyLevel: hasSevereInjury ? "P0" : "P1",
-        urgencyReason: hasSevereInjury
-          ? "市民描述涉及外傷及行動障礙，存在隱匿性骨折或軟組織挫傷，建議列為 P0 極度緊急處置。"
-          : "動物處於流浪無依狀態，有輕度感染及脫水風險，需志願團體介入提供檢查安置。",
-        rescueEquipment: isDog
-          ? ["大型犬安全牽引繩及口套", "犬隻誘捕籠 / 誘食罐頭", "急救止血紗布包", "折疊式急救擔架"]
-          : ["貓咪安全誘捕籠", "厚織防咬防抓毛巾", "貓用航空硬提箱", "生理鹽水及棉花棒"],
-        firstAidAdvice: [
-          "保持 2-3 米安全觀測距離，避免大聲呼喊或突然靠近造成驚慌逃竄。",
-          "如動物倒地無法動彈，請勿隨意搬動軀幹以防脊椎加重損傷。",
-          "可提供少量常溫清水，切勿餵食調味人食或牛奶。",
-          "在現場或安全遮蔽處守護，並持續留意動物呼吸起伏與去向。"
-        ],
-        handlingPrecautions: [
-          "受傷動物在疼痛狀態下極易觸發防禦性攻擊（撕咬/抓傷），市民請勿徒手觸摸傷處。",
-          "注意周邊車輛通行安全，勿強行在車行道上圍堵。"
-        ],
-        confidenceScore: 0.91,
-        analyzedAt: new Date().toISOString(),
-      };
+      res.json({
+        noResponse: true,
+        message: "Gemini 沒有回應",
+        analysisResult: null,
+      });
+      return;
     }
 
     res.json(analysisResult);

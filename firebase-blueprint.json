@@ -2,120 +2,155 @@
   "entities": {
     "Case": {
       "title": "Stray Animal Rescue Case",
-      "description": "A reported stray or injured animal case requiring rescue coordination",
+      "description": "Rescue case table storing case ID, citizen contact, Gemini AI analysis, and Cloud Storage photo link",
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
-          "description": "Unique identifier for the case",
+          "description": "Unique Case ID (e.g. PW-XXXXXX)",
           "maxLength": 64,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
+        "title": {
+          "type": "string",
+          "description": "Case title summary",
+          "maxLength": 150
+        },
         "animalType": {
           "type": "string",
-          "description": "Type of animal reported",
+          "description": "Reported animal species",
           "enum": ["cat", "dog", "bird", "other"]
         },
-        "urgency": {
+        "customAnimalName": {
           "type": "string",
-          "description": "Triage urgency level",
-          "enum": ["P0", "P1", "P2"]
-        },
-        "status": {
-          "type": "string",
-          "description": "Current workflow status of the rescue case",
-          "enum": ["pending", "in_progress", "rescued", "closed"]
-        },
-        "description": {
-          "type": "string",
-          "description": "Citizen provided description and context",
-          "maxLength": 1000
+          "description": "Citizen custom species name if other",
+          "maxLength": 100
         },
         "photoUrl": {
           "type": "string",
-          "description": "Cloud Storage public URL of the uploaded animal photo",
-          "maxLength": 1000
+          "description": "Cloud Storage public download URL of animal photo",
+          "maxLength": 2048
+        },
+        "storagePath": {
+          "type": "string",
+          "description": "Cloud Storage object path linked to this case (e.g. animal-reports/PW-XXX.jpg)",
+          "maxLength": 256
+        },
+        "description": {
+          "type": "string",
+          "description": "Citizen field description of animal condition",
+          "maxLength": 2000
         },
         "reporterName": {
           "type": "string",
-          "description": "Name or pseudonym of reporting citizen",
+          "description": "Citizen reporter contact name",
           "maxLength": 100
         },
         "reporterPhone": {
           "type": "string",
-          "description": "Contact phone for rescue follow-up",
+          "description": "Citizen reporter contact phone",
           "maxLength": 50
         },
         "reporterEmail": {
           "type": "string",
-          "description": "Email address for case confirmation and tracking",
+          "description": "Citizen reporter contact email for case tracking",
           "maxLength": 120
         },
         "createdByUid": {
           "type": "string",
-          "description": "Auth UID or anonymous identifier of the reporter",
+          "description": "Auth UID or anonymous tracking token",
           "maxLength": 128
+        },
+        "status": {
+          "type": "string",
+          "description": "Rescue progress status",
+          "enum": ["pending", "in_progress", "rescued", "closed"]
+        },
+        "urgency": {
+          "type": "string",
+          "description": "Urgency triage level",
+          "enum": ["P0", "P1", "P2"]
         }
       },
       "required": ["id", "animalType", "urgency", "status", "description"]
     },
-    "NGO": {
-      "title": "Non-Governmental Animal Welfare Organization",
-      "description": "Registered rescue organization participating in rescue dispatch",
+    "NGODatail": {
+      "title": "NGO Rescue Organization Detail",
+      "description": "NGO partner profile and operational dispatch status table",
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
-          "description": "Identifier of the NGO",
+          "description": "Unique NGO identifier",
           "maxLength": 64,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
         "name": {
           "type": "string",
-          "description": "Full formal name of the NGO",
+          "description": "Chinese name of NGO",
+          "maxLength": 120
+        },
+        "englishName": {
+          "type": "string",
+          "description": "English name of NGO",
+          "maxLength": 120
+        },
+        "hotline": {
+          "type": "string",
+          "description": "Emergency dispatch hotline",
+          "maxLength": 50
+        },
+        "whatsapp": {
+          "type": "string",
+          "description": "WhatsApp dispatch number",
+          "maxLength": 50
+        },
+        "address": {
+          "type": "string",
+          "description": "Physical headquarters or station address",
+          "maxLength": 200
+        },
+        "district": {
+          "type": "string",
+          "description": "Operating district in HK",
           "maxLength": 100
-        },
-        "shortName": {
-          "type": "string",
-          "description": "Abbreviated brand name",
-          "maxLength": 50
-        },
-        "emergencyPhone": {
-          "type": "string",
-          "description": "Emergency dispatch phone number",
-          "maxLength": 50
         },
         "capacityStatus": {
           "type": "string",
-          "description": "Operational capacity status",
+          "description": "Operational load status",
           "enum": ["available", "busy", "full"]
         },
         "operatingHours": {
           "type": "string",
-          "description": "Hours of emergency operations",
+          "description": "Hours of operations",
           "maxLength": 100
         }
       },
-      "required": ["id", "name", "emergencyPhone", "capacityStatus"]
+      "required": ["id", "name", "hotline", "capacityStatus"]
     },
-    "Admin": {
-      "title": "Platform Administrator",
-      "description": "Authorized administrator record for role-based access control",
+    "AdminUser": {
+      "title": "Platform Administrator User",
+      "description": "Admin user table authorized to manage cases, NGOs, and dispatch",
       "type": "object",
       "properties": {
         "uid": {
           "type": "string",
-          "description": "User UID of admin",
+          "description": "Firebase Auth UID of administrator",
           "maxLength": 128
         },
         "email": {
           "type": "string",
-          "description": "Admin email address",
+          "description": "Authorized administrator email",
           "maxLength": 120
+        },
+        "name": {
+          "type": "string",
+          "description": "Administrator display name",
+          "maxLength": 100
         },
         "role": {
           "type": "string",
-          "description": "Role string",
+          "description": "Administrative permission tier",
           "enum": ["admin", "superadmin"]
         }
       },
@@ -123,17 +158,29 @@
     }
   },
   "firestore": {
+    "/case/{caseId}": {
+      "schema": "Case",
+      "description": "Primary case table storing all stray animal rescue reports, citizen contact, Gemini AI answer, and Cloud Storage photo linkage"
+    },
+    "/ngodatail/{ngoId}": {
+      "schema": "NGODatail",
+      "description": "NGO detail table storing partner rescue organizations, emergency contact hotlines, and dispatch status"
+    },
+    "/adminuser/{adminId}": {
+      "schema": "AdminUser",
+      "description": "Admin user table authorizing backend management and database operations"
+    },
     "/cases/{caseId}": {
       "schema": "Case",
-      "description": "Collection of all stray animal rescue reports submitted by citizens"
+      "description": "Legacy/compatibility mirror path for case records"
     },
     "/ngos/{ngoId}": {
-      "schema": "NGO",
-      "description": "Directory of registered rescue organizations and active status"
+      "schema": "NGODatail",
+      "description": "Legacy/compatibility mirror path for NGO records"
     },
-    "/admins/{adminUid}": {
-      "schema": "Admin",
-      "description": "Registry of authorized platform administrator accounts"
+    "/admins/{adminId}": {
+      "schema": "AdminUser",
+      "description": "Legacy/compatibility mirror path for admin records"
     }
   }
 }

@@ -52,16 +52,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         let isAdminRole = isSuperEmail;
 
         try {
-          const adminDoc = await getDoc(doc(db, 'admins', currentUser.uid));
+          const adminDoc = await getDoc(doc(db, 'adminuser', currentUser.uid));
           if (adminDoc.exists() || isSuperEmail) {
             isAdminRole = true;
             if (isSuperEmail && !adminDoc.exists()) {
-              await setDoc(doc(db, 'admins', currentUser.uid), {
+              const adminPayload = {
                 uid: currentUser.uid,
                 email: currentUser.email,
-                role: 'admin',
+                name: currentUser.displayName || 'Platform Administrator',
+                role: 'superadmin',
                 createdAt: new Date().toISOString(),
-              });
+              };
+              await setDoc(doc(db, 'adminuser', currentUser.uid), adminPayload);
+              setDoc(doc(db, 'admins', currentUser.uid), adminPayload).catch(() => {});
             }
           }
         } catch (e) {

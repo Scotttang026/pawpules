@@ -123,6 +123,11 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                   referrerPolicy="no-referrer"
                 />
               </div>
+              {report.storagePath && (
+                <p className="text-3xs text-stone-500 font-mono mt-1.5 truncate px-1" title={report.storagePath}>
+                  ☁️ Storage: <span className="text-amber-800">{report.storagePath}</span>
+                </p>
+              )}
             </div>
 
             <div className="md:col-span-7 space-y-3">
@@ -231,8 +236,9 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
               {report.aiAnalysis ? (
                 <AIAnalysisCard analysis={report.aiAnalysis} />
               ) : (
-                <div className="p-6 text-center text-stone-500 bg-stone-50 rounded-2xl border">
-                  尚未完成 AI 分析
+                <div className="p-8 text-center text-stone-500 bg-stone-50 rounded-2xl border border-stone-200 space-y-1.5">
+                  <p className="text-sm font-bold text-stone-700">Gemini 沒有回應</p>
+                  <p className="text-xs text-stone-400">未能取得 AI 傷勢分析報告，請依照現場實際狀況進行救助。</p>
                 </div>
               )}
             </div>

@@ -216,11 +216,14 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     try {
       const reportId = `PW-${Date.now().toString(36).toUpperCase()}`;
 
-      // 1. Photo Storage Upload (Firebase Cloud Storage)
+      // 1. Photo Storage Upload (Firebase Cloud Storage & persistent linkage)
       let finalPhotoUrl = photoPreview;
+      let finalStoragePath = `animal-reports/${reportId}.jpg`;
       if (photoBlob) {
         setStatusMessage('☁️ 正在上傳照片至 Cloud Storage 物件儲存...');
-        finalPhotoUrl = await uploadAnimalPhoto(photoBlob, reportId, photoPreview);
+        const uploadResult = await uploadAnimalPhoto(photoBlob, reportId, photoPreview);
+        finalPhotoUrl = uploadResult.downloadUrl;
+        finalStoragePath = uploadResult.storagePath;
       }
 
       // 2. Prepare Base64 for Gemini Multimodal Analysis
@@ -241,10 +244,17 @@ export const ReportForm: React.FC<ReportFormProps> = ({
         });
 
         if (aiResponse.ok) {
-          aiResult = await aiResponse.json();
+          const data = await aiResponse.json();
+          if (data && !data.noResponse && data.urgencyLevel) {
+            aiResult = data;
+          } else {
+            aiResult = null;
+            console.info('Gemini API returned no response.');
+          }
         }
       } catch (aiErr) {
-        console.warn('AI analysis call failed, proceeding with heuristic:', aiErr);
+        console.warn('AI analysis call failed or had no response:', aiErr);
+        aiResult = null;
       }
 
       const urgency = aiResult?.urgencyLevel || 'P1';
@@ -252,28 +262,30 @@ export const ReportForm: React.FC<ReportFormProps> = ({
       // 4. Match Firestore NGOs directly
       const matchedNGOs = rankFirestoreNGOs(ngos, location.lat, location.lng, animalType, urgency);
 
-      // 5. Construct Report payload
+      // 5. Construct Report payload linking all case fields
       const effectiveReporterName = isAnonymous ? '匿名通報市民' : reporterName.trim() || '熱心市民';
       const effectiveReporterPhone = isAnonymous ? '未提供 (匿名)' : reporterPhone.trim() || '未填寫';
       const effectiveReporterEmail = reporterEmail.trim() || 'scotttang026jp@gmail.com';
 
       const newReport: StrayReport = {
-        id: reportId,
+        id: reportId, // 每個 case 通報生成之 Case ID
         title: `${location.district || '市區'} - ${
           animalType === 'cat' ? '流浪貓' : animalType === 'dog' ? '流浪狗' : '動物'
         }通報`,
         animalType,
         customAnimalName: customAnimalName.trim() || undefined,
         photoUrl: finalPhotoUrl,
+        storagePath: finalStoragePath, // 與 Cloud Storage 連動之物件路徑與 ID
         location,
         description: description.trim(),
-        reporterName: effectiveReporterName,
-        reporterPhone: effectiveReporterPhone,
-        reporterEmail: effectiveReporterEmail,
+        reporterName: effectiveReporterName, // 通報人姓名
+        reporterPhone: effectiveReporterPhone, // 通報人聯絡電話
+        reporterEmail: effectiveReporterEmail, // 通報人聯絡電郵
         createdByUid: user?.uid || 'anonymous',
         createdAt: new Date().toISOString(),
-        status: 'analyzed',
+        status: 'pending',
         urgency,
+        geminiResponse: aiResult, // Gemini 回答之完整內容
         aiAnalysis: aiResult,
         matchedNGOs: matchedNGOs.slice(0, 3),
       };
