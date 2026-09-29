@@ -169,18 +169,6 @@
     "/adminuser/{adminId}": {
       "schema": "AdminUser",
       "description": "Admin user table authorizing backend management and database operations"
-    },
-    "/cases/{caseId}": {
-      "schema": "Case",
-      "description": "Legacy/compatibility mirror path for case records"
-    },
-    "/ngos/{ngoId}": {
-      "schema": "NGODatail",
-      "description": "Legacy/compatibility mirror path for NGO records"
-    },
-    "/admins/{adminId}": {
-      "schema": "AdminUser",
-      "description": "Legacy/compatibility mirror path for admin records"
     }
   }
 }

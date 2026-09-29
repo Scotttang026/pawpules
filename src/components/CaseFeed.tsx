@@ -1,11 +1,21 @@
 import React, { useState } from 'react';
 import { StrayReport, AnimalType, UrgencyLevel, CaseStatus } from '../types';
-import { Search, Sparkles, MapPin, Clock, ShieldAlert, CheckCircle2, ChevronRight, Phone } from 'lucide-react';
+import { Search, Sparkles, MapPin, Clock, ShieldAlert, ChevronRight } from 'lucide-react';
 
 interface CaseFeedProps {
   reports: StrayReport[];
   onSelectReport: (report: StrayReport) => void;
   onNavigateToMap: (coords: { lat: number; lng: number }) => void;
+}
+
+// 統一動物標籤/emoji,對應 types.ts 已擴充嘅 AnimalType('bird' 已加入)
+function getAnimalMeta(type: AnimalType): { label: string; emoji: string } {
+  switch (type) {
+    case 'cat': return { label: '貓咪', emoji: '🐱' };
+    case 'dog': return { label: '犬隻', emoji: '🐶' };
+    case 'bird': return { label: '雀鳥', emoji: '🕊️' };
+    default: return { label: '其他', emoji: '🐾' };
+  }
 }
 
 export const CaseFeed: React.FC<CaseFeedProps> = ({
@@ -33,16 +43,17 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
     return true;
   });
 
+  // ⚠️ 已修正:原本用 'analyzed'／'dispatched' 呢兩個已經被移除嘅
+  // CaseStatus 值,依家統一對齊 types.ts 實際嘅四個合法狀態
+  // ('pending'/'in_progress'/'rescued'/'closed')
   const getStatusBadge = (status: CaseStatus) => {
     switch (status) {
       case 'in_progress':
         return { label: '救援前往中', class: 'bg-blue-100 text-blue-800 border-blue-200' };
       case 'rescued':
         return { label: '已成功救助', class: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
-      case 'dispatched':
-        return { label: '已送交機構', class: 'bg-purple-100 text-purple-800 border-purple-200' };
-      case 'analyzed':
-        return { label: 'AI已診斷', class: 'bg-amber-100 text-amber-800 border-amber-200' };
+      case 'closed':
+        return { label: '已結案', class: 'bg-stone-200 text-stone-800 border-stone-300' };
       default:
         return { label: '待處理', class: 'bg-stone-100 text-stone-700 border-stone-200' };
     }
@@ -50,7 +61,6 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
 
   return (
     <div className="space-y-4" id="case-feed-container">
-      {/* Search & Filter Header */}
       <div className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm space-y-3">
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
@@ -65,14 +75,11 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
             />
           </div>
 
-          {/* Species pills */}
           <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
             <button
               onClick={() => setSelectedAnimal('all')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                selectedAnimal === 'all'
-                  ? 'bg-amber-500 text-white'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                selectedAnimal === 'all' ? 'bg-amber-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
               }`}
             >
               全部 ({reports.length})
@@ -80,9 +87,7 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
             <button
               onClick={() => setSelectedAnimal('cat')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                selectedAnimal === 'cat'
-                  ? 'bg-amber-500 text-white'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                selectedAnimal === 'cat' ? 'bg-amber-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
               }`}
             >
               🐱 貓咪
@@ -90,17 +95,23 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
             <button
               onClick={() => setSelectedAnimal('dog')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                selectedAnimal === 'dog'
-                  ? 'bg-amber-500 text-white'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                selectedAnimal === 'dog' ? 'bg-amber-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
               }`}
             >
               🐶 犬隻
             </button>
+            {/* ⚠️ 已補上 bird 篩選,對應 types.ts 已擴充嘅 AnimalType */}
+            <button
+              onClick={() => setSelectedAnimal('bird')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+                selectedAnimal === 'bird' ? 'bg-amber-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+              }`}
+            >
+              🕊️ 雀鳥
+            </button>
           </div>
         </div>
 
-        {/* Urgency & Status row */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-stone-100 text-xs text-stone-600">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[11px] font-semibold text-stone-400">緊急等級：</span>
@@ -123,9 +134,11 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
             ))}
           </div>
 
+          {/* ⚠️ 已改用實際四個合法 CaseStatus 值,取代原本包含
+              'analyzed' 且漏咗 'pending'／'closed' 嘅錯誤清單 */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[11px] font-semibold text-stone-400">狀態：</span>
-            {(['all', 'analyzed', 'in_progress', 'rescued'] as const).map((st) => (
+            {(['all', 'pending', 'in_progress', 'rescued', 'closed'] as const).map((st) => (
               <button
                 key={st}
                 onClick={() => setSelectedStatus(st)}
@@ -137,18 +150,19 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
               >
                 {st === 'all'
                   ? '全部'
-                  : st === 'analyzed'
-                  ? '已診斷'
+                  : st === 'pending'
+                  ? '待處理'
                   : st === 'in_progress'
                   ? '救援中'
-                  : '已獲救'}
+                  : st === 'rescued'
+                  ? '已獲救'
+                  : '已結案'}
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Case List Cards */}
       {reports.length === 0 ? (
         <div className="bg-white rounded-3xl border border-stone-200 p-12 text-center text-stone-500 shadow-xs space-y-3">
           <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 mx-auto">
@@ -170,36 +184,39 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
           {filteredReports.map((report) => {
             const statusCfg = getStatusBadge(report.status);
             const isP0 = report.urgency === 'P0';
+            const animalMeta = getAnimalMeta(report.animalType);
+
+            // ⚠️ 防禦性處理:同 AIAnalysisCard.tsx 一致嘅風險——
+            // firestore.rules 只驗證 aiAnalysis is map,冇驗證內部
+            // apparentInjuries 是否真係陣列,直接 .join() 一個非陣列
+            // 值會拋出錯誤拖垮整個動態牆列表渲染。
+            const safeInjuries = Array.isArray(report.aiAnalysis?.apparentInjuries)
+              ? report.aiAnalysis!.apparentInjuries
+              : [];
 
             return (
               <div
                 key={report.id}
                 className={`bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer overflow-hidden flex flex-col justify-between ${
-                  isP0
-                    ? 'border-rose-300 ring-1 ring-rose-200'
-                    : 'border-stone-200 hover:border-stone-300'
+                  isP0 ? 'border-rose-300 ring-1 ring-rose-200' : 'border-stone-200 hover:border-stone-300'
                 }`}
                 onClick={() => onSelectReport(report)}
                 id={`case-card-${report.id}`}
               >
                 <div>
-                  {/* Photo and Badges */}
                   <div className="relative aspect-16/9 overflow-hidden bg-stone-100">
                     <img
                       src={report.photoUrl}
                       alt={report.title}
                       className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
                       referrerPolicy="no-referrer"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
                     />
 
                     <div className="absolute top-3 left-3 flex items-center gap-1.5">
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-xs font-bold text-white shadow-xs ${
-                          report.urgency === 'P0'
-                            ? 'bg-rose-600 animate-pulse'
-                            : report.urgency === 'P1'
-                            ? 'bg-amber-500'
-                            : 'bg-emerald-600'
+                          report.urgency === 'P0' ? 'bg-rose-600 animate-pulse' : report.urgency === 'P1' ? 'bg-amber-500' : 'bg-emerald-600'
                         }`}
                       >
                         {report.urgency}
@@ -210,11 +227,10 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
                     </div>
 
                     <div className="absolute bottom-2 right-2 bg-black/60 backdrop-blur text-white text-[11px] px-2 py-0.5 rounded-md">
-                      {report.animalType === 'cat' ? '🐱 貓咪' : report.animalType === 'dog' ? '🐶 犬隻' : '🐾 其他'}
+                      {animalMeta.emoji} {animalMeta.label}
                     </div>
                   </div>
 
-                  {/* Body Info */}
                   <div className="p-4 space-y-2.5">
                     <div>
                       <h3 className="font-bold text-sm text-stone-900 line-clamp-1">{report.title}</h3>
@@ -224,34 +240,33 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
                       </div>
                     </div>
 
-                    <p className="text-xs text-stone-600 line-clamp-2 leading-relaxed">
-                      {report.description}
-                    </p>
+                    <p className="text-xs text-stone-600 line-clamp-2 leading-relaxed">{report.description}</p>
 
-                    {/* AI Diagnosis Snippet */}
                     {report.aiAnalysis && (
                       <div className="bg-stone-50 rounded-xl p-2.5 border border-stone-200/70 text-xs">
                         <div className="flex items-center gap-1 font-bold text-stone-800 mb-1">
                           <Sparkles className="w-3 h-3 text-amber-600" />
-                          <span>AI 診斷：{report.aiAnalysis.estimatedBreed}</span>
+                          <span>AI 診斷：{report.aiAnalysis.estimatedBreed || '未知'}</span>
                         </div>
-                        <div className="text-[11px] text-stone-600 line-clamp-1">
-                          ⚠️ {report.aiAnalysis.apparentInjuries.join('；')}
-                        </div>
+                        {safeInjuries.length > 0 && (
+                          <div className="text-[11px] text-stone-600 line-clamp-1">
+                            ⚠️ {safeInjuries.join('；')}
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    {/* Matched NGO */}
                     {report.matchedNGOs && report.matchedNGOs.length > 0 && (
                       <div className="flex items-center justify-between text-[11px] text-stone-500 pt-1">
                         <span>媒合首選：<strong className="text-stone-800">{report.matchedNGOs[0].name}</strong></span>
-                        <span className="text-amber-700 font-semibold">約 {report.matchedNGOs[0].distanceKm} km</span>
+                        <span className="text-amber-700 font-semibold">
+                          約 {Number.isFinite(report.matchedNGOs[0].distanceKm) ? `${report.matchedNGOs[0].distanceKm} km` : '未知距離'}
+                        </span>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Footer Controls */}
                 <div className="px-4 py-3 bg-stone-50 border-t border-stone-100 flex items-center justify-between text-xs">
                   <span className="text-stone-400 flex items-center gap-1">
                     <Clock className="w-3 h-3" />

@@ -1,15 +1,18 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Default deny catch-all
+    // 預設拒絕：任何冇被下面明確 match 到嘅路徑一律拒絕
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper functions
+    // ---------- Helper functions ----------
+
     function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() > 0 && id.size() <= 128
+        && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
@@ -24,78 +27,77 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // ⚠️ email fallback 只做首次 bootstrap 用途，
+    // 正式管理員文件建立後建議移除呢條硬編碼判斷
     function isAdmin() {
       return isSignedIn() && (
         exists(/databases/$(database)/documents/adminuser/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
-        (request.auth.token.email == "scotttang026jp@gmail.com" && request.auth.token.email_verified == true)
+        (request.auth.token.email == "scotttang026jp@gmail.com"
+          && request.auth.token.email_verified == true)
       );
     }
 
-    function isValidCase(data) {
-      return data.id is string && isValidId(data.id) &&
-        data.animalType in ['cat', 'dog', 'bird', 'other'] &&
-        data.urgency in ['P0', 'P1', 'P2'] &&
-        data.status in ['pending', 'in_progress', 'rescued', 'closed'] &&
-        data.description is string && data.description.size() <= 2500 &&
-        (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 2048)) &&
-        (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() <= 256)) &&
-        (!('reporterName' in data) || (data.reporterName is string && data.reporterName.size() <= 100)) &&
-        (!('reporterEmail' in data) || (data.reporterEmail is string && data.reporterEmail.size() <= 120)) &&
-        (!('reporterPhone' in data) || (data.reporterPhone is string && data.reporterPhone.size() <= 50));
+    // 白名單對照 caseService.ts createCaseInFirestore() 實際寫入嘅完整 20 個欄位
+    function isValidCase(data, docId) {
+      let allowedKeys = [
+        'id', 'title', 'animalType', 'customAnimalName',
+        'photoUrl', 'storagePath', 'location', 'description',
+        'reporterName', 'reporterPhone', 'reporterEmail',
+        'createdByUid', 'createdAt', 'updatedAt', 'status', 'urgency',
+        'geminiResponse', 'aiAnalysis', 'matchedNGOs', 'dispatchedToNGO'
+      ];
+
+      return data.keys().hasOnly(allowedKeys)
+        && data.id == docId
+        && isValidId(data.id)
+        && data.animalType in ['cat', 'dog', 'bird', 'other']
+        && data.urgency in ['P0', 'P1', 'P2']
+        && data.status in ['pending', 'in_progress', 'rescued', 'closed']
+        && data.description is string
+        && data.description.size() > 0 && data.description.size() <= 2500
+        && (!('title' in data) || (data.title is string && data.title.size() <= 150))
+        && (!('customAnimalName' in data) || (data.customAnimalName is string && data.customAnimalName.size() <= 100))
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 2048))
+        && (!('storagePath' in data) || (data.storagePath is string && data.storagePath.size() <= 256))
+        && (!('reporterName' in data) || (data.reporterName is string && data.reporterName.size() <= 100))
+        && (!('reporterEmail' in data) || (data.reporterEmail is string && data.reporterEmail.size() <= 120))
+        && (!('reporterPhone' in data) || (data.reporterPhone is string && data.reporterPhone.size() <= 50))
+        && (!('createdByUid' in data) || (data.createdByUid is string && data.createdByUid.size() <= 128))
+        && (!('location' in data) || data.location is map)
+        && (!('geminiResponse' in data) || data.geminiResponse == null || data.geminiResponse is map)
+        && (!('aiAnalysis' in data) || data.aiAnalysis == null || data.aiAnalysis is map)
+        && (!('matchedNGOs' in data) || data.matchedNGOs == null || data.matchedNGOs is list)
+        && (!('dispatchedToNGO' in data) || data.dispatchedToNGO == null || data.dispatchedToNGO is map);
     }
 
-    // 1. Primary "case" table
+    // ---------- /case/{caseId}：案件主表 ----------
     match /case/{caseId} {
       allow read: if true;
-      allow create: if isValidId(caseId) && isValidCase(incoming());
-      allow update: if isValidId(caseId) && (
-        isAdmin() ||
-        (
-          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'dispatchedToNGO', 'updatedAt']) &&
-          incoming().status in ['pending', 'in_progress', 'rescued', 'closed']
-        )
-      );
+
+      allow create: if isValidId(caseId)
+        && isValidCase(incoming(), caseId)
+        && incoming().status == 'pending';
+
+      // 收緊做 admin-only，唔容許任何未驗證身分嘅用戶更新狀態
+      allow update: if isAdmin()
+        && isValidCase(incoming(), caseId)
+        && incoming().diff(existing()).affectedKeys()
+             .hasOnly(['status', 'dispatchedToNGO', 'updatedAt']);
+
       allow delete: if isAdmin();
     }
 
-    // Legacy mirror "cases" collection
-    match /cases/{caseId} {
-      allow read: if true;
-      allow create: if isValidId(caseId) && isValidCase(incoming());
-      allow update: if isValidId(caseId) && (
-        isAdmin() ||
-        (
-          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'dispatchedToNGO', 'updatedAt']) &&
-          incoming().status in ['pending', 'in_progress', 'rescued', 'closed']
-        )
-      );
-      allow delete: if isAdmin();
-    }
-
-    // 2. Primary "ngodatail" table
+    // ---------- /ngodatail/{ngoId}：NGO 資料表 ----------
     match /ngodatail/{ngoId} {
       allow read: if true;
-      allow create: if isValidId(ngoId) && incoming().name is string;
-      allow update, delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
-    // Legacy mirror "ngos" collection
-    match /ngos/{ngoId} {
-      allow read: if true;
-      allow create: if isValidId(ngoId) && incoming().name is string;
-      allow update, delete: if isAdmin();
-    }
-
-    // 3. Primary "adminuser" table for backstage administration
+    // ---------- /adminuser/{adminId}：管理員名冊 ----------
     match /adminuser/{adminId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
-    }
-
-    // Legacy mirror "admins" collection
-    match /admins/{adminId} {
-      allow read: if isSignedIn();
+      // 容許用戶讀取「自己嗰份」文件（存在與否），
+      // 避免 checkAndRegisterAdminUser() 對一般用戶觸發不必要嘅 permission-denied
+      allow read: if isSignedIn() && (isAdmin() || request.auth.uid == adminId);
       allow write: if isAdmin();
     }
   }

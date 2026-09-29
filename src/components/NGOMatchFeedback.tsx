@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { NGOOrganization, StrayReport } from '../types';
+import { NGOOrganization, StrayReport, AnimalType } from '../types';
 import { getGoogleMapsDirectionsUrl } from '../utils/location';
+import { useAuth } from '../contexts/AuthContext';
 import { Phone, MessageCircle, Navigation, Send, CheckCircle2, ShieldAlert, Clock, Building, Award } from 'lucide-react';
 
 interface NGOMatchFeedbackProps {
@@ -9,11 +10,28 @@ interface NGOMatchFeedbackProps {
   onDispatchToNGO?: (ngoId: string, ngoName: string) => Promise<void>;
 }
 
+// ⚠️ 新增：統一嘅動物類型標籤函式，取代原本散落各處、只判斷
+// cat/dog 兩種嘅不完整三元／二元運算式（原本 bird 同 other 會被
+// 誤標為「狗」）。
+function getAnimalTypeLabel(type: AnimalType): string {
+  switch (type) {
+    case 'cat':
+      return '貓';
+    case 'dog':
+      return '狗';
+    case 'bird':
+      return '鳥';
+    default:
+      return '動物';
+  }
+}
+
 export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
   report,
   matchedNGOs,
   onDispatchToNGO,
 }) => {
+  const { isAdmin } = useAuth();
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
   const [dispatchedSuccessId, setDispatchedSuccessId] = useState<string | null>(
     report.dispatchedToNGO?.ngoId || null
@@ -26,7 +44,8 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
       if (onDispatchToNGO) {
         await onDispatchToNGO(ngo.id, ngo.name);
       } else {
-        // Fallback simulation
+        // Fallback：僅喺父層冇提供 onDispatchToNGO 時使用，
+        // 目前 App.tsx 兩處呼叫都必定會傳入該 prop，此路徑屬於防禦性備援。
         await fetch('/api/ngo/notify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -34,19 +53,47 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
             reportId: report.id,
             ngoId: ngo.id,
             ngoName: ngo.name,
-            reporterName: report.reporterName,
-            reporterPhone: report.reporterPhone,
             urgency: report.urgency,
-            location: report.location,
           }),
         });
       }
       setDispatchedSuccessId(ngo.id);
     } catch (err) {
       console.error('Failed to notify NGO:', err);
+      alert('通知 NGO 失敗，請稍後再試或直接致電機構熱線。');
     } finally {
       setDispatchingId(null);
     }
+  };
+
+  // ⚠️ 私隱保護：由於案件詳情對任何訪客公開可讀（firestore.rules
+  // 設定 allow read: if true），WhatsApp 分享連結嘅內容會直接出現
+  // 喺頁面 DOM／href 屬性入面，任何人檢視原始碼都睇得到，完全繞過
+  // CaseDetailModal 已經做嘅畫面遮蔽。因此呢裡獨立再做一次防護：
+  // 只有管理員先會將報案人真實電話帶入訊息內容，非管理員嘅訊息
+  // 改用案件追蹤連結取代，確保救援協調資訊唔會連帶洩漏個人聯絡方式。
+  //
+  // 已知取捨：報案人本人喺提交成功後嘅即時檢視畫面（App.tsx 嘅
+  // justSubmittedReport 流程）亦會經過呢個組件，若佢並非已登入
+  // 管理員，佢自己嘅電話喺呢個訊息預覽入面同樣會被遮蔽。呢個屬於
+  // 刻意嘅保守設計（因為冇辦法可靠地驗證匿名提交者嘅身份），使用者
+  // 本身已經知道自己電話，可自行手動聯絡 NGO，唔影響實際救援流程。
+  const buildWhatsAppMessage = (): string => {
+    const animalLabel = getAnimalTypeLabel(report.animalType);
+    const trackingUrl = `${window.location.origin}/?caseId=${encodeURIComponent(report.id)}`;
+
+    const contactLine = isAdmin
+      ? `通報人電話: ${report.reporterPhone}`
+      : `詳細聯絡資訊請查閱案件追蹤連結: ${trackingUrl}`;
+
+    return [
+      '【PawPulse 流浪動物通報求助】',
+      `個案編號: ${report.id}`,
+      `動物: ${animalLabel}${report.customAnimalName ? ` (${report.customAnimalName})` : ''}`,
+      `緊急度: ${report.urgency}`,
+      `地點: ${report.location.address}`,
+      contactLine,
+    ].join('\n');
   };
 
   return (
@@ -61,7 +108,7 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
                 自動媒合鄰近 NGO 機構 ({matchedNGOs.length} 間推薦)
               </h3>
               <p className="text-xs text-stone-500">
-                依據動物物種（{report.animalType === 'cat' ? '貓' : report.animalType === 'dog' ? '狗' : '其他'}）、
+                依據動物物種（{getAnimalTypeLabel(report.animalType)}）、
                 緊急等級（{report.urgency}）及地理直線/行車距離智慧配對
               </p>
             </div>
@@ -74,6 +121,12 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
 
       {/* NGO List */}
       <div className="p-5 space-y-4">
+        {matchedNGOs.length === 0 && (
+          <div className="p-6 text-center text-stone-400 text-xs">
+            暫無自動媒合的 NGO 機構，請直接使用下方緊急熱線聯絡。
+          </div>
+        )}
+
         {matchedNGOs.map((ngo, index) => {
           const isTopMatch = index === 0;
           const isDispatched = dispatchedSuccessId === ngo.id;
@@ -109,10 +162,9 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
                   <p className="text-xs text-stone-500">{ngo.englishName}</p>
                 </div>
 
-                {/* Match Score & Distance */}
                 <div className="text-right shrink-0">
                   <div className="text-xs font-bold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full inline-block">
-                    匹配度 {ngo.matchScore || 95}%
+                    匹配度 {ngo.matchScore ?? 95}%
                   </div>
                   <div className="text-xs text-stone-600 mt-1 font-medium">
                     距離約 <span className="font-bold text-stone-900">{ngo.distanceKm} km</span>
@@ -122,13 +174,11 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
                 </div>
               </div>
 
-              {/* Address & Hours */}
               <p className="text-xs text-stone-600 mb-2">
                 <span className="font-medium text-stone-700">基地地址：</span>
                 {ngo.address}
               </p>
 
-              {/* Specialties tags */}
               <div className="flex flex-wrap gap-1.5 mb-3">
                 {ngo.specialties.map((spec, sIdx) => (
                   <span
@@ -140,15 +190,12 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
                 ))}
               </div>
 
-              {/* Operating hours note */}
               <div className="flex items-center gap-1.5 text-xs text-stone-500 mb-3.5">
                 <Clock className="w-3.5 h-3.5 text-stone-400 shrink-0" />
                 <span>服務時間：{ngo.operatingHours}</span>
               </div>
 
-              {/* Actions row */}
               <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-stone-200/80">
-                {/* Contact buttons */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <a
                     href={`tel:${ngo.hotline.replace(/\s+/g, '')}`}
@@ -162,11 +209,7 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
                   {ngo.whatsapp && (
                     <a
                       href={`https://wa.me/852${ngo.whatsapp.replace(/\s+/g, '')}?text=${encodeURIComponent(
-                        `【PawPulse 流浪動物通報求助】\n個案編號: ${report.id}\n動物: ${
-                          report.animalType === 'cat' ? '貓' : '狗'
-                        } (${report.customAnimalName || ''})\n緊急度: ${report.urgency}\n地點: ${
-                          report.location.address
-                        }\n通報人電話: ${report.reporterPhone}`
+                        buildWhatsAppMessage()
                       )}`}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -190,7 +233,6 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
                   </a>
                 </div>
 
-                {/* Dispatch Button */}
                 <div>
                   {isDispatched ? (
                     <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg">
@@ -216,7 +258,6 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
         })}
       </div>
 
-      {/* Bottom Emergency Tip */}
       <div className="bg-amber-500/10 border-t border-amber-200/60 p-3.5 px-5 flex items-center justify-between text-xs text-amber-900">
         <div className="flex items-center gap-2">
           <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0" />

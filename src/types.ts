@@ -1,8 +1,14 @@
-export type AnimalType = 'cat' | 'dog' | 'other';
+// ⚠️ 已加入 'bird'，同 firestore.rules 及 entities schema 對齊。
+// 如果產品範圍確實不打算處理雀鳥案件，請反過來喺 Rules／schema 移除 bird。
+export type AnimalType = 'cat' | 'dog' | 'bird' | 'other';
 
 export type UrgencyLevel = 'P0' | 'P1' | 'P2'; // P0: 極度緊急(重傷/瀕危), P1: 需醫療關注(骨折/明顯傷病), P2: 穩定(走失/幼崽/普通救助)
 
-export type CaseStatus = 'pending' | 'analyzed' | 'dispatched' | 'in_progress' | 'rescued' | 'closed';
+// ⚠️ 已移除 'analyzed' 與 'dispatched'，因為目前 firestore.rules 嘅
+// isValidCase() 只接受 pending/in_progress/rescued/closed 四個值，
+// 寫入其他兩個值會被 Firestore 直接拒絕。如果你有計劃將來引入
+// 更細緻嘅分階段狀態，請同時擴充 firestore.rules 嘅 enum。
+export type CaseStatus = 'pending' | 'in_progress' | 'rescued' | 'closed';
 
 export interface LocationCoords {
   lat: number;
@@ -69,6 +75,9 @@ export interface StrayReport {
     ngoName: string;
     dispatchedAt: string;
     status: 'sent' | 'acknowledged' | 'en_route' | 'arrived';
+    // ⚠️ 新增：反映伺服器目前尚未串接真實推播服務嘅誠實標記，
+    // 對應 server.ts /api/ngo/notify 回傳嘅 simulated 欄位
+    simulated?: boolean;
   };
 }
 
@@ -89,4 +98,3 @@ export interface UserProfile {
   role: 'admin' | 'user';
   isAdmin: boolean;
 }
-

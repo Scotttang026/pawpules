@@ -10,18 +10,13 @@ import {
   getDoc,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { StrayReport, CaseStatus, NGOOrganization, AnimalType, UrgencyLevel, AdminUser } from '../types';
+import { StrayReport, CaseStatus, NGOOrganization, AnimalType, UrgencyLevel } from '../types';
 import { calculateDistanceKm } from '../utils/location';
 import { monitoring } from '../utils/monitoring';
 
-// Primary collection paths as requested by user
 export const CASE_COLLECTION = 'case';
 export const NGO_COLLECTION = 'ngodatail';
 export const ADMIN_COLLECTION = 'adminuser';
-
-// Compatibility mirror collections
-const CASES_MIRROR = 'cases';
-const NGOS_MIRROR = 'ngos';
 
 /**
  * Real-time listener for stray animal rescue cases directly from Firestore 'case' table.
@@ -68,7 +63,6 @@ export function subscribeToCases(
         });
       });
 
-      // Sort newest first
       loadedCases.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       onUpdate(loadedCases);
     },
@@ -81,12 +75,12 @@ export function subscribeToCases(
 }
 
 /**
- * Save new report into database 'case' table (and mirror to 'cases' for compatibility)
+ * Save new report into 'case' table. Status is hardcoded to 'pending'
+ * as a defensive frontend guard, in addition to server-side Rules enforcement.
  */
 export async function createCaseInFirestore(report: StrayReport): Promise<void> {
   try {
     const caseRef = doc(db, CASE_COLLECTION, report.id);
-    const mirrorRef = doc(db, CASES_MIRROR, report.id);
 
     const payload = {
       id: report.id,
@@ -103,7 +97,7 @@ export async function createCaseInFirestore(report: StrayReport): Promise<void> 
       createdByUid: report.createdByUid || 'anonymous',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      status: report.status,
+      status: 'pending',
       urgency: report.urgency,
       geminiResponse: report.geminiResponse || report.aiAnalysis || null,
       aiAnalysis: report.aiAnalysis || report.geminiResponse || null,
@@ -112,9 +106,6 @@ export async function createCaseInFirestore(report: StrayReport): Promise<void> 
     };
 
     await setDoc(caseRef, payload);
-    // Write mirror non-blocking
-    setDoc(mirrorRef, payload).catch(() => {});
-
     monitoring.log('info', 'firestore', `Created case #${report.id} in case table`, { urgency: report.urgency });
   } catch (err) {
     monitoring.captureError(err, { caseId: report.id });
@@ -123,7 +114,7 @@ export async function createCaseInFirestore(report: StrayReport): Promise<void> 
 }
 
 /**
- * Update case rescue status
+ * Update case rescue status. Requires admin privileges per Firestore Rules.
  */
 export async function updateCaseStatusInFirestore(
   caseId: string,
@@ -132,7 +123,6 @@ export async function updateCaseStatusInFirestore(
 ): Promise<void> {
   try {
     const caseRef = doc(db, CASE_COLLECTION, caseId);
-    const mirrorRef = doc(db, CASES_MIRROR, caseId);
 
     const updatePayload: Record<string, any> = {
       status: newStatus,
@@ -144,8 +134,6 @@ export async function updateCaseStatusInFirestore(
     }
 
     await updateDoc(caseRef, updatePayload);
-    updateDoc(mirrorRef, updatePayload).catch(() => {});
-
     monitoring.log('info', 'firestore', `Updated case #${caseId} status to ${newStatus}`);
   } catch (err) {
     monitoring.captureError(err, { caseId, newStatus });
@@ -160,7 +148,6 @@ export async function deleteCaseInFirestore(caseId: string): Promise<void> {
   try {
     const caseRef = doc(db, CASE_COLLECTION, caseId);
     await deleteDoc(caseRef);
-    deleteDoc(doc(db, CASES_MIRROR, caseId)).catch(() => {});
     monitoring.log('warn', 'firestore', `Deleted case #${caseId} from case table`);
   } catch (err) {
     monitoring.captureError(err, { caseId });
@@ -200,7 +187,7 @@ export function subscribeToNGOs(
 }
 
 /**
- * Create or save an NGO to 'ngodatail' table
+ * Create or save an NGO to 'ngodatail' table. Requires admin privileges per Rules.
  */
 export async function createNGOInFirestore(ngo: NGOOrganization): Promise<void> {
   try {
@@ -212,8 +199,6 @@ export async function createNGOInFirestore(ngo: NGOOrganization): Promise<void> 
       createdAt: serverTimestamp(),
     };
     await setDoc(ngoRef, payload);
-    setDoc(doc(db, NGOS_MIRROR, ngo.id), payload).catch(() => {});
-
     monitoring.log('info', 'firestore', `Added NGO ${ngo.name} (${ngo.id}) to ngodatail table`);
   } catch (err) {
     monitoring.captureError(err, { ngoId: ngo.id });
@@ -228,7 +213,6 @@ export async function deleteNGOInFirestore(ngoId: string): Promise<void> {
   try {
     const ngoRef = doc(db, NGO_COLLECTION, ngoId);
     await deleteDoc(ngoRef);
-    deleteDoc(doc(db, NGOS_MIRROR, ngoId)).catch(() => {});
     monitoring.log('warn', 'firestore', `Deleted NGO #${ngoId} from ngodatail table`);
   } catch (err) {
     monitoring.captureError(err, { ngoId });
@@ -249,8 +233,6 @@ export async function updateNGOCapacity(
       capacityStatus,
       updatedAt: serverTimestamp(),
     });
-    updateDoc(doc(db, NGOS_MIRROR, ngoId), { capacityStatus, updatedAt: serverTimestamp() }).catch(() => {});
-
     monitoring.log('info', 'firestore', `Updated NGO ${ngoId} capacity to ${capacityStatus}`);
   } catch (err) {
     monitoring.captureError(err, { ngoId, capacityStatus });
@@ -268,7 +250,8 @@ export async function checkAndRegisterAdminUser(
 ): Promise<boolean> {
   if (!uid || !email) return false;
 
-  const isConfiguredAdmin = email.toLowerCase() === 'scotttang026jp@gmail.com';
+  const normalizedEmail = email.trim().toLowerCase();
+  const isConfiguredAdmin = normalizedEmail === 'scotttang026jp@gmail.com';
 
   try {
     const adminDocRef = doc(db, ADMIN_COLLECTION, uid);
@@ -281,13 +264,13 @@ export async function checkAndRegisterAdminUser(
     if (isConfiguredAdmin) {
       await setDoc(adminDocRef, {
         uid,
-        email,
+        email: normalizedEmail,
         name: displayName || 'Platform Administrator',
         role: 'superadmin',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      monitoring.log('info', 'auth', `Registered SuperAdmin ${email} into adminuser table`);
+      monitoring.log('info', 'auth', `Registered SuperAdmin ${normalizedEmail} into adminuser table`);
       return true;
     }
   } catch (err) {
@@ -314,23 +297,19 @@ export function rankFirestoreNGOs(
     const driveTimeMins = Math.max(5, Math.round(distKm * 2.5));
 
     let score = 100;
-    // Distance penalty
     score -= distKm * 3.5;
 
-    // Animal type acceptance check
     if (ngo.acceptedAnimals && ngo.acceptedAnimals.includes(animalType)) {
       score += 25;
     } else {
       score -= 40;
     }
 
-    // Urgency matching
     if (urgency === 'P0') {
       if (ngo.hasEmergencyRescue) score += 35;
       else score -= 25;
     }
 
-    // Capacity status
     if (ngo.capacityStatus === 'busy') score -= 15;
     if (ngo.capacityStatus === 'full') score -= 50;
 

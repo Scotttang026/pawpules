@@ -23,7 +23,10 @@ import {
 
 interface ReportFormProps {
   ngos: NGOOrganization[];
-  onSubmitReport: (newReport: StrayReport) => void;
+  // ⚠️ 已改為回傳 Promise<boolean>：true 代表 Firestore 寫入成功，
+  // 令本表單可以確認案件已真正儲存之後先發送確認信，
+  // 避免市民收到「已立案」通知但實際上案件從未成功寫入資料庫。
+  onSubmitReport: (newReport: StrayReport) => Promise<boolean>;
   onAnalysisStart?: () => void;
 }
 
@@ -43,15 +46,30 @@ export const ReportForm: React.FC<ReportFormProps> = ({
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [reporterName, setReporterName] = useState(user?.displayName || '熱心市民');
   const [reporterPhone, setReporterPhone] = useState('');
-  const [reporterEmail, setReporterEmail] = useState(user?.email || 'scotttang026jp@gmail.com');
+  // ⚠️ 已修正：預設值改為空字串，之前錯誤預設咗管理員個人 email，
+  // 會導致市民漏填時案件確認信被寄去管理員信箱而唔係報案人信箱。
+  const [reporterEmail, setReporterEmail] = useState(user?.email || '');
 
   // Anti-abuse Captcha
   const [captchaCode, setCaptchaCode] = useState('');
   const [userCaptchaInput, setUserCaptchaInput] = useState('');
-  const [agreedPrivacy, setAgreedPrivacy] = useState(true);
+  // ⚠️ 已修正：私隱同意勾選框預設改為 false，要求用戶主動勾選同意。
+  // 預設已勾選嘅同意方式（pre-ticked consent）在多數私隱法規下
+  // 唔被視為有效同意，屬於常見嘅 dark pattern，必須改為主動 opt-in。
+  const [agreedPrivacy, setAgreedPrivacy] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+
   // Generate random 4-character anti-spam code
+  //
+  // ⚠️ 重要提醒：呢個驗證碼完全喺前端 JavaScript 生成同比對，
+  // 對於直接呼叫 API／Firestore 嘅自動化腳本完全冇任何實際阻擋力，
+  // 只能夠阻止最基本、冇特別針對性嘅表單填寫機械人。
+  // 如需要真正有效嘅防濫用機制，建議串接 Google reCAPTCHA v3
+  // 或 Firebase App Check（你嘅 firebase-applet-config.json 已有
+  // 預留 recaptchaSiteKey 欄位但目前為空，可考慮填入並整合）。
   const refreshCaptcha = () => {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     let code = '';
@@ -77,6 +95,9 @@ export const ReportForm: React.FC<ReportFormProps> = ({
   }, [user]);
 
   // Location state
+  // ⚠️ 注意：此處預設值為第一個預設地點，如果市民忘記確認／更新
+  // 位置就直接送出，案件會攜帶錯誤位置。由於本平台處理 P0 緊急
+  // 案件，建議日後可以考慮加入「請確認地址正確」嘅二次確認提示。
   const [location, setLocation] = useState<LocationCoords>({
     lat: PRESET_LOCATIONS[0].lat,
     lng: PRESET_LOCATIONS[0].lng,
@@ -87,13 +108,10 @@ export const ReportForm: React.FC<ReportFormProps> = ({
   const [isGeolocating, setIsGeolocating] = useState(false);
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
 
-  // Submission / AI analysis state
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Handle local file upload with canvas compression
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -110,7 +128,6 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     }
   };
 
-  // Browser GPS auto-locate
   const handleGetCurrentLocation = () => {
     if (!navigator.geolocation) {
       alert('您的裝置或瀏覽器不支援地理定位');
@@ -148,7 +165,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
         }
         setIsGeolocating(false);
       },
-      (err) => {
+      () => {
         setIsGeolocating(false);
         setStatusMessage('GPS 定位失敗或被拒絕，請手動輸入地址');
       },
@@ -156,7 +173,6 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     );
   };
 
-  // Geocode address
   const handleSearchManualAddress = async () => {
     if (!manualAddressInput.trim()) return;
 
@@ -182,9 +198,9 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     setIsSearchingAddress(false);
   };
 
-  // Submit report
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError('');
 
     if (!photoBlob && !photoPreview) {
       alert('請先上傳或拍攝動物現場照片');
@@ -196,14 +212,12 @@ export const ReportForm: React.FC<ReportFormProps> = ({
       return;
     }
 
-    // Anti-abuse: verify captcha
     if (userCaptchaInput.trim().toUpperCase() !== captchaCode.toUpperCase()) {
       alert('防濫用驗證碼不正確，請重新輸入以保障通報真實性。');
       refreshCaptcha();
       return;
     }
 
-    // Legal & Privacy check
     if (!agreedPrivacy) {
       alert('請先閱讀並勾選同意《個人資料（私隱）條例》通報者聲明及 AI 獸醫分診免責條款。');
       return;
@@ -214,11 +228,16 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     if (onAnalysisStart) onAnalysisStart();
 
     try {
-      const reportId = `PW-${Date.now().toString(36).toUpperCase()}`;
+      // ⚠️ Case ID 已加入隨機尾碼，降低同一毫秒內多筆提交產生 ID
+      // 碰撞（collision）嘅風險，避免罕見情況下覆蓋另一宗案件。
+      const reportId = `PW-${Date.now().toString(36).toUpperCase()}-${Math.random()
+        .toString(36)
+        .slice(2, 6)
+        .toUpperCase()}`;
 
-      // 1. Photo Storage Upload (Firebase Cloud Storage & persistent linkage)
       let finalPhotoUrl = photoPreview;
       let finalStoragePath = `animal-reports/${reportId}.jpg`;
+
       if (photoBlob) {
         setStatusMessage('☁️ 正在上傳照片至 Cloud Storage 物件儲存...');
         const uploadResult = await uploadAnimalPhoto(photoBlob, reportId, photoPreview);
@@ -226,10 +245,19 @@ export const ReportForm: React.FC<ReportFormProps> = ({
         finalStoragePath = uploadResult.storagePath;
       }
 
-      // 2. Prepare Base64 for Gemini Multimodal Analysis
+      // ⚠️ 防禦性檢查：firestore.rules 限制 photoUrl 長度上限 2048 字元。
+      // 正常流程下 uploadAnimalPhoto 成功後 finalPhotoUrl 會係短小嘅
+      // Storage URL，但如果上傳步驟被跳過（例如冇 photoBlob），
+      // finalPhotoUrl 會回退去 photoPreview（可能係幾百 KB 嘅 base64
+      // dataURL），必定超過限制導致 Firestore 直接拒絕寫入。
+      // 提早喺前端偵測並友善提示，好過等到最後一步先收到含糊嘅
+      // permission-denied 錯誤。
+      if (finalPhotoUrl.length > 2048) {
+        throw new Error('照片連結過長，可能係上傳步驟未完成，請重新選擇照片再試一次。');
+      }
+
       const analysisBase64 = photoPreview;
 
-      // 3. Call AI analysis backend
       setStatusMessage('🔍 Gemini AI 正在評估外傷、呼吸起伏與骨折跡象...');
       let aiResult = null;
       try {
@@ -259,38 +287,48 @@ export const ReportForm: React.FC<ReportFormProps> = ({
 
       const urgency = aiResult?.urgencyLevel || 'P1';
 
-      // 4. Match Firestore NGOs directly
       const matchedNGOs = rankFirestoreNGOs(ngos, location.lat, location.lng, animalType, urgency);
 
-      // 5. Construct Report payload linking all case fields
       const effectiveReporterName = isAnonymous ? '匿名通報市民' : reporterName.trim() || '熱心市民';
       const effectiveReporterPhone = isAnonymous ? '未提供 (匿名)' : reporterPhone.trim() || '未填寫';
-      const effectiveReporterEmail = reporterEmail.trim() || 'scotttang026jp@gmail.com';
+      const effectiveReporterEmail = reporterEmail.trim();
 
       const newReport: StrayReport = {
-        id: reportId, // 每個 case 通報生成之 Case ID
+        id: reportId,
         title: `${location.district || '市區'} - ${
           animalType === 'cat' ? '流浪貓' : animalType === 'dog' ? '流浪狗' : '動物'
         }通報`,
         animalType,
         customAnimalName: customAnimalName.trim() || undefined,
         photoUrl: finalPhotoUrl,
-        storagePath: finalStoragePath, // 與 Cloud Storage 連動之物件路徑與 ID
+        storagePath: finalStoragePath,
         location,
         description: description.trim(),
-        reporterName: effectiveReporterName, // 通報人姓名
-        reporterPhone: effectiveReporterPhone, // 通報人聯絡電話
-        reporterEmail: effectiveReporterEmail, // 通報人聯絡電郵
+        reporterName: effectiveReporterName,
+        reporterPhone: effectiveReporterPhone,
+        reporterEmail: effectiveReporterEmail || undefined,
         createdByUid: user?.uid || 'anonymous',
         createdAt: new Date().toISOString(),
         status: 'pending',
         urgency,
-        geminiResponse: aiResult, // Gemini 回答之完整內容
+        geminiResponse: aiResult,
         aiAnalysis: aiResult,
         matchedNGOs: matchedNGOs.slice(0, 3),
       };
 
-      // 6. Send confirmation email with Case ID to reporter
+      // ⚠️ 已修正順序：先確認 Firestore 寫入成功，先發送確認信。
+      // 之前嘅版本喺呢一步之前就已經觸發咗確認信，若果案件最終
+      // 未能成功儲存，市民會收到一封指向唔存在案件嘅確認信。
+      setStatusMessage('☁️ 正在儲存案件記錄...');
+      const saveSuccess = await onSubmitReport(newReport);
+
+      if (!saveSuccess) {
+        // 上層（App.tsx）會顯示失敗提示 banner，呢裡只需要還原
+        // 本地提交狀態，讓市民可以在同一份已填寫內容上重試。
+        setSubmitError('案件儲存失敗，請稍後再試一次。');
+        return;
+      }
+
       if (effectiveReporterEmail) {
         try {
           setStatusMessage('📧 正在發送案件立案確認信與追蹤連結至您的電子信箱...');
@@ -310,12 +348,9 @@ export const ReportForm: React.FC<ReportFormProps> = ({
           console.warn('Confirmation email dispatch warning:', emailErr);
         }
       }
-
-      // 7. Save to Firestore
-      onSubmitReport(newReport);
     } catch (err: any) {
       console.error('Submit report error:', err);
-      alert('通報送出時發生問題，請檢查後重試。');
+      setSubmitError(err?.message || '通報送出時發生問題，請檢查後重試。');
     } finally {
       setIsSubmitting(false);
       setStatusMessage('');
@@ -426,11 +461,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
           <div className="flex flex-col sm:flex-row gap-4 items-center">
             <div className="w-full sm:w-48 h-40 rounded-2xl overflow-hidden bg-stone-200 border-2 border-stone-300/80 shrink-0 relative group shadow-2xs">
               {photoPreview ? (
-                <img
-                  src={photoPreview}
-                  alt="現場照片預覽"
-                  className="w-full h-full object-cover"
-                />
+                <img src={photoPreview} alt="現場照片預覽" className="w-full h-full object-cover" />
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center text-stone-400 gap-1.5 p-3 text-center">
                   <Camera className="w-8 h-8" />
@@ -677,6 +708,14 @@ export const ReportForm: React.FC<ReportFormProps> = ({
             </label>
           </div>
         </div>
+
+        {/* Submission error */}
+        {submitError && (
+          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{submitError}</span>
+          </div>
+        )}
 
         {/* Live Status indicator if processing */}
         {statusMessage && (

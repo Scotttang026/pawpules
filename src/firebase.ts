@@ -13,6 +13,11 @@ const app = initializeApp(firebaseConfig);
 
 // Initialize Services
 /* CRITICAL: Explicit firestoreDatabaseId is required by AI Studio environment */
+if (!firebaseConfig.firestoreDatabaseId) {
+  console.warn(
+    'firebase.ts: firestoreDatabaseId 未設定，可能會連接到錯誤的 Firestore database。'
+  );
+}
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const storage = getStorage(app);
@@ -45,7 +50,12 @@ export interface FirestoreErrorInfo {
 }
 
 /**
- * Standardized Firestore error logger adhering to security guidelines
+ * Standardized Firestore error logger.
+ *
+ * ⚠️ 已修正私隱洩漏問題：完整結構化資訊（含 email／uid）只會寫入
+ * console.error（畀開發者喺伺服器端 log 睇），但拋出畀呼叫方嗰個
+ * Error 只帶簡短、唔含 PII 嘅訊息，避免呢啲個人資訊經由 UI 顯示
+ * 或者第三方監控工具（例如 Sentry）意外外洩。
  */
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
   const errInfo: FirestoreErrorInfo = {
@@ -64,23 +74,28 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path,
   };
+
+  // 完整資訊只留喺伺服器端／開發者 console，唔會外洩
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+
+  // 拋出畀呼叫方嗰個 Error 唔含任何 PII
+  throw new Error(`Firestore ${operationType} failed at ${path ?? 'unknown path'}`);
 }
 
 /**
- * Startup connectivity test as specified in the Firebase Skill instructions
+ * Startup connectivity test as specified in the Firebase Skill instructions.
+ * 改用 error.code（結構化）判斷離線狀態，比對錯誤訊息文字內容更穩健。
  */
 export async function testConnection(): Promise<boolean> {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
     return true;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
+  } catch (error: any) {
+    if (error?.code === 'unavailable') {
       console.warn('Firestore offline or connecting: please check Firebase network status.');
       return false;
     }
-    // Test doc may not exist or rules may disallow read on /test, which is normal
+    // Test doc 可能不存在，或者 Rules 拒絕讀取 /test，屬於預期行為
     return true;
   }
 }

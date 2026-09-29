@@ -39,6 +39,25 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({ analysis, compac
 
   const urgency = getUrgencyConfig(analysis.urgencyLevel);
 
+  // ⚠️ 防禦性處理：firestore.rules 只驗證 aiAnalysis is map，冇驗證內部
+  // 巢狀結構，理論上任何格式異常嘅寫入都可能令 .map()／.length 直接
+  // 拋出錯誤拖垮整個組件（並非 XSS，純粹係 availability／crash 風險）。
+  // 以下全部改用 `|| []` 保底。
+  const safeInjuries = analysis.apparentInjuries || [];
+  const safeEquipment = analysis.rescueEquipment || [];
+  const safeFirstAid = analysis.firstAidAdvice || [];
+  const safePrecautions = analysis.handlingPrecautions || [];
+  const safeConfidence = typeof analysis.confidenceScore === 'number' && !Number.isNaN(analysis.confidenceScore)
+    ? analysis.confidenceScore
+    : 0.9;
+
+  const analyzedTimeLabel = (() => {
+    const d = new Date(analysis.analyzedAt);
+    return Number.isNaN(d.getTime())
+      ? '未知時間'
+      : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  })();
+
   if (compact) {
     return (
       <div className={`rounded-xl p-3 border ${urgency.bgClass}`} id="ai-analysis-compact">
@@ -52,10 +71,11 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({ analysis, compac
           </span>
         </div>
         <p className="text-xs text-stone-700 mb-1">
-          <strong className="text-stone-900">{analysis.identifiedSpecies}</strong> ({analysis.estimatedBreed})
+          <strong className="text-stone-900">{analysis.identifiedSpecies || '未知物種'}</strong>
+          {analysis.estimatedBreed ? ` (${analysis.estimatedBreed})` : ''}
         </p>
         <p className="text-xs text-stone-600 line-clamp-2">
-          {analysis.urgencyReason}
+          {analysis.urgencyReason || '暫無評估說明'}
         </p>
       </div>
     );
@@ -63,7 +83,6 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({ analysis, compac
 
   return (
     <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden" id="ai-analysis-card">
-      {/* Header Banner */}
       <div className="bg-gradient-to-r from-stone-900 via-stone-800 to-stone-900 text-white px-5 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
@@ -73,11 +92,11 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({ analysis, compac
             <h3 className="font-bold text-sm tracking-wide flex items-center gap-2">
               Google Gemini 多模態 AI 傷病判斷報告
               <span className="text-xs font-normal text-stone-400">
-                (信心度 {Math.round(analysis.confidenceScore * 100)}%)
+                (信心度 {Math.round(safeConfidence * 100)}%)
               </span>
             </h3>
             <p className="text-xs text-stone-300">
-              分析時間：{new Date(analysis.analyzedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              分析時間：{analyzedTimeLabel}
             </p>
           </div>
         </div>
@@ -88,19 +107,17 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({ analysis, compac
       </div>
 
       <div className="p-5 space-y-4">
-        {/* Identified Animal Details */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pb-3 border-b border-stone-100">
           <div className="bg-stone-50 rounded-xl p-3 border border-stone-200/60">
             <span className="text-xs font-medium text-stone-500 block mb-0.5">辨識物種</span>
-            <span className="text-sm font-bold text-stone-900">{analysis.identifiedSpecies}</span>
+            <span className="text-sm font-bold text-stone-900">{analysis.identifiedSpecies || '未知'}</span>
           </div>
           <div className="bg-stone-50 rounded-xl p-3 border border-stone-200/60">
             <span className="text-xs font-medium text-stone-500 block mb-0.5">推測品種與毛色</span>
-            <span className="text-sm font-semibold text-stone-800">{analysis.estimatedBreed}</span>
+            <span className="text-sm font-semibold text-stone-800">{analysis.estimatedBreed || '未知'}</span>
           </div>
         </div>
 
-        {/* Appearance description */}
         {analysis.appearanceDescription && (
           <div className="text-xs text-stone-600 bg-stone-50/70 p-3 rounded-xl border border-stone-200/50">
             <strong className="text-stone-800">體態特徵：</strong>
@@ -108,77 +125,84 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({ analysis, compac
           </div>
         )}
 
-        {/* Urgency justification */}
         <div className={`p-3.5 rounded-xl border ${urgency.bgClass}`}>
           <div className="flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
             <div>
               <p className="text-xs font-bold text-stone-900 mb-0.5">緊急度評定原因</p>
-              <p className="text-xs text-stone-700 leading-relaxed">{analysis.urgencyReason}</p>
+              <p className="text-xs text-stone-700 leading-relaxed">{analysis.urgencyReason || '暫無評估說明'}</p>
             </div>
           </div>
         </div>
 
-        {/* Apparent Injuries */}
         <div>
           <div className="flex items-center gap-1.5 text-xs font-bold text-stone-900 mb-2">
             <Activity className="w-4 h-4 text-rose-600" />
-            <span>初步檢測傷病／異常跡象 ({analysis.apparentInjuries.length})</span>
+            <span>初步檢測傷病／異常跡象 ({safeInjuries.length})</span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {analysis.apparentInjuries.map((injury, idx) => (
-              <div
-                key={idx}
-                className="flex items-center gap-2 text-xs text-stone-800 bg-rose-50/60 border border-rose-100 px-3 py-2 rounded-lg"
-              >
-                <div className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
-                <span>{injury}</span>
-              </div>
-            ))}
-          </div>
+          {safeInjuries.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {safeInjuries.map((injury, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-2 text-xs text-stone-800 bg-rose-50/60 border border-rose-100 px-3 py-2 rounded-lg"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                  <span>{injury}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-stone-400">未偵測到明顯異常跡象。</p>
+          )}
         </div>
 
-        {/* Equipment Needed for Rescuers */}
         <div>
           <div className="flex items-center gap-1.5 text-xs font-bold text-stone-900 mb-2">
             <Wrench className="w-4 h-4 text-blue-600" />
             <span>建議 NGO 救助隊準備裝備</span>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {analysis.rescueEquipment.map((eq, idx) => (
-              <span
-                key={idx}
-                className="px-2.5 py-1 text-xs font-medium text-blue-800 bg-blue-50 border border-blue-200 rounded-lg"
-              >
-                ✓ {eq}
-              </span>
-            ))}
-          </div>
+          {safeEquipment.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {safeEquipment.map((eq, idx) => (
+                <span
+                  key={idx}
+                  className="px-2.5 py-1 text-xs font-medium text-blue-800 bg-blue-50 border border-blue-200 rounded-lg"
+                >
+                  ✓ {eq}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-stone-400">暫無特別裝備建議。</p>
+          )}
         </div>
 
-        {/* Citizen Field First-Aid Advice */}
         <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-xl p-3.5">
           <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-900 mb-2">
             <HeartHandshake className="w-4 h-4 text-emerald-700" />
             <span>通報市民現場應急守則 (等待救援期間)</span>
           </div>
-          <ul className="space-y-1.5">
-            {analysis.firstAidAdvice.map((advice, idx) => (
-              <li key={idx} className="flex items-start gap-2 text-xs text-emerald-900/90 leading-relaxed">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                <span>{advice}</span>
-              </li>
-            ))}
-          </ul>
+          {safeFirstAid.length > 0 ? (
+            <ul className="space-y-1.5">
+              {safeFirstAid.map((advice, idx) => (
+                <li key={idx} className="flex items-start gap-2 text-xs text-emerald-900/90 leading-relaxed">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                  <span>{advice}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-emerald-700/70">暫無現場應急建議，請依一般動物救助常識處理。</p>
+          )}
         </div>
 
-        {/* Handling Precautions */}
-        {analysis.handlingPrecautions && analysis.handlingPrecautions.length > 0 && (
+        {safePrecautions.length > 0 && (
           <div className="text-xs text-amber-800 bg-amber-50/80 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div className="leading-relaxed">
               <strong className="block text-amber-900 mb-0.5">安全禁忌與防護提示：</strong>
-              {analysis.handlingPrecautions.join('；')}
+              {safePrecautions.join('；')}
             </div>
           </div>
         )}

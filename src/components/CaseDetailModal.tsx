@@ -16,14 +16,34 @@ import {
   Check,
   ShieldCheck,
   Trash2,
+  Lock,
 } from 'lucide-react';
 
 interface CaseDetailModalProps {
   report: StrayReport;
   onClose: () => void;
-  onUpdateStatus: (reportId: string, newStatus: CaseStatus) => void;
+  // ⚠️ 已改為 optional：非管理員身份時，App.tsx 會傳入 undefined，
+  // 呢裡必須配合改為可選型別，否則 TypeScript 編譯會直接報錯。
+  onUpdateStatus?: (reportId: string, newStatus: CaseStatus) => void;
   onDispatchToNGO: (ngoId: string, ngoName: string) => Promise<void>;
   onDeleteCase?: (reportId: string) => void;
+}
+
+// 將電話號碼遮蔽為 "9XXX XXXX" 形式，只保留首位數字辨識，
+// 避免非管理員讀取完整聯絡方式。
+function maskPhone(phone: string): string {
+  if (!phone || phone === '未填寫' || phone === '未提供 (匿名)') return phone;
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 4) return '****';
+  return `${digits.slice(0, 1)}${'X'.repeat(Math.max(0, digits.length - 4))}${digits.slice(-3)}`;
+}
+
+// 將 email 遮蔽為 "ab***@domain.com" 形式
+function maskEmail(email: string): string {
+  const [local, domain] = email.split('@');
+  if (!domain) return '***';
+  const visible = local.slice(0, 2);
+  return `${visible}${'*'.repeat(Math.max(1, local.length - 2))}@${domain}`;
 }
 
 export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
@@ -44,12 +64,22 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
     { status: 'closed', label: '已結案', color: 'bg-stone-200 text-stone-800' },
   ];
 
+  const currentStatusLabel =
+    statusOptions.find((opt) => opt.status === report.status)?.label || report.status;
+
   const handleCopyTrackingLink = () => {
     const url = `${window.location.origin}/?caseId=${encodeURIComponent(report.id)}`;
-    navigator.clipboard.writeText(url);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+    try {
+      navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch (err) {
+      console.warn('Clipboard write failed:', err);
+      alert(`請手動複製連結：${url}`);
+    }
   };
+
+  const canManageStatus = isAdmin && typeof onUpdateStatus === 'function';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto" id="case-detail-modal">
@@ -140,25 +170,51 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                   </div>
                 </div>
 
+                {/*
+                  ⚠️ 私隱保護：由於 firestore.rules 設定案件為公開可讀
+                  （allow read: if true），任何人都可以打開此對話框，
+                  所以報案人嘅電話同 email 只向管理員顯示完整內容，
+                  非管理員只會見到遮蔽版本。長遠建議將呢部分資料改為
+                  儲存喺獨立 subcollection 並收緊讀取權限，而唔淨係
+                  靠前端遮蔽（前端遮蔽只能夠阻止一般使用者透過畫面
+                  直接睇到，唔能夠阻止有心人直接查詢 Firestore API）。
+                */}
                 <div className="flex items-center gap-4 flex-wrap pt-2 border-t border-stone-200/60 text-2xs">
                   <div className="flex items-center gap-1.5 text-stone-600">
                     <User className="w-3.5 h-3.5 text-stone-400" />
                     <span>通報人：<strong>{report.reporterName}</strong></span>
                   </div>
+
                   {report.reporterPhone && report.reporterPhone !== '未填寫' && (
                     <div className="flex items-center gap-1.5 text-stone-600">
                       <Phone className="w-3.5 h-3.5 text-stone-400" />
-                      <a href={`tel:${report.reporterPhone}`} className="text-blue-600 font-bold hover:underline">
-                        {report.reporterPhone}
-                      </a>
+                      {isAdmin ? (
+                        <a href={`tel:${report.reporterPhone}`} className="text-blue-600 font-bold hover:underline">
+                          {report.reporterPhone}
+                        </a>
+                      ) : (
+                        <span className="flex items-center gap-1 text-stone-400" title="僅管理員可查看完整聯絡方式">
+                          <Lock className="w-3 h-3" />
+                          {maskPhone(report.reporterPhone)}
+                        </span>
+                      )}
                     </div>
                   )}
+
                   {report.reporterEmail && (
                     <div className="flex items-center gap-1.5 text-stone-600">
                       <Mail className="w-3.5 h-3.5 text-stone-400" />
-                      <span className="text-stone-700">{report.reporterEmail}</span>
+                      {isAdmin ? (
+                        <span className="text-stone-700">{report.reporterEmail}</span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-stone-400" title="僅管理員可查看完整聯絡方式">
+                          <Lock className="w-3 h-3" />
+                          {maskEmail(report.reporterEmail)}
+                        </span>
+                      )}
                     </div>
                   )}
+
                   <div className="flex items-center gap-1.5 text-stone-500">
                     <Clock className="w-3.5 h-3.5 text-stone-400" />
                     <span>{new Date(report.createdAt).toLocaleString()}</span>
@@ -173,35 +229,43 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                 </div>
               </div>
 
-              {/* Status Updater for Volunteers / Rescuers / Admins */}
+              {/* Status Updater — 只有管理員先可以互動變更，其他人只見唯讀狀態 */}
               <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-200">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-amber-600" />
                     救援進度狀態 (Firestore 即時共享)：
                   </span>
-                  {isAdmin && (
+                  {canManageStatus && (
                     <span className="text-2xs bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full font-bold">
                       管理員可任意變更
                     </span>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {statusOptions.map((opt) => (
-                    <button
-                      key={opt.status}
-                      type="button"
-                      onClick={() => onUpdateStatus(report.id, opt.status)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
-                        report.status === opt.status
-                          ? 'bg-amber-600 text-white border-amber-600 shadow-xs ring-2 ring-amber-300'
-                          : 'bg-white text-stone-700 border-stone-300 hover:bg-stone-100'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
+
+                {canManageStatus ? (
+                  <div className="flex flex-wrap gap-2">
+                    {statusOptions.map((opt) => (
+                      <button
+                        key={opt.status}
+                        type="button"
+                        onClick={() => onUpdateStatus!(report.id, opt.status)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                          report.status === opt.status
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-xs ring-2 ring-amber-300'
+                            : 'bg-white text-stone-700 border-stone-300 hover:bg-stone-100'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-stone-300 text-xs font-bold text-stone-700">
+                    {currentStatusLabel}
+                    <span className="text-2xs text-stone-400 font-normal">（僅管理員可變更狀態）</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
