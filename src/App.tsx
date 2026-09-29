@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StrayReport, CaseStatus } from './types';
-import { SAMPLE_CASES } from './data/sampleCases';
+import { StrayReport, CaseStatus, NGOOrganization } from './types';
 import { Navbar } from './components/Navbar';
 import { ReportForm } from './components/ReportForm';
 import { AIAnalysisCard } from './components/AIAnalysisCard';
@@ -8,51 +7,105 @@ import { NGOMatchFeedback } from './components/NGOMatchFeedback';
 import { InteractiveMap } from './components/InteractiveMap';
 import { CaseFeed } from './components/CaseFeed';
 import { NGODirectory } from './components/NGODirectory';
+import { AdminDashboard } from './components/AdminDashboard';
 import { CaseDetailModal } from './components/CaseDetailModal';
 import { EmergencyGuideModal } from './components/EmergencyGuideModal';
-import { Sparkles, MapPin, CheckCircle2, ArrowRight, ShieldAlert, HeartHandshake, PhoneCall } from 'lucide-react';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import {
+  subscribeToCases,
+  createCaseInFirestore,
+  updateCaseStatusInFirestore,
+  deleteCaseInFirestore,
+  subscribeToNGOs,
+  createNGOInFirestore,
+  deleteNGOInFirestore,
+  updateNGOCapacity,
+} from './services/caseService';
+import {
+  MapPin,
+  CheckCircle2,
+  PhoneCall,
+  Mail,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
 
-const STORAGE_KEY = 'pawpulse_reports_v1';
-
-export default function App() {
-  const [reports, setReports] = useState<StrayReport[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.warn('Failed to load local reports:', e);
-    }
-    return SAMPLE_CASES;
-  });
-
-  const [currentTab, setCurrentTab] = useState<'report' | 'map' | 'cases' | 'ngos'>('report');
+function AppContent() {
+  const { isAdmin } = useAuth();
+  const [reports, setReports] = useState<StrayReport[]>([]);
+  const [ngos, setNgos] = useState<NGOOrganization[]>([]);
+  const [currentTab, setCurrentTab] = useState<'report' | 'map' | 'cases' | 'ngos' | 'admin'>('report');
   const [selectedReportForModal, setSelectedReportForModal] = useState<StrayReport | null>(null);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number } | undefined>(undefined);
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [justSubmittedReport, setJustSubmittedReport] = useState<StrayReport | null>(null);
+  const [emailConfirmationBanner, setEmailConfirmationBanner] = useState<{ caseId: string; email: string } | null>(null);
 
-  // Sync reports to localStorage
+  // Real-time Firestore sync for cases and NGOs
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(reports));
-    } catch (e) {
-      console.warn('Failed to save reports:', e);
+    const unsubscribeCases = subscribeToCases(
+      (updatedCases) => {
+        setReports(updatedCases);
+      },
+      (err) => {
+        console.warn('Real-time cases sync warning:', err);
+      }
+    );
+
+    const unsubscribeNGOs = subscribeToNGOs(
+      (updatedNGOs) => {
+        setNgos(updatedNGOs);
+      },
+      (err) => {
+        console.warn('Real-time NGOs sync warning:', err);
+      }
+    );
+
+    return () => {
+      unsubscribeCases();
+      unsubscribeNGOs();
+    };
+  }, []);
+
+  // Support direct case tracking link (?caseId=PW-XXXX)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const caseId = params.get('caseId');
+    if (caseId && reports.length > 0) {
+      const match = reports.find((r) => r.id === caseId);
+      if (match) {
+        setSelectedReportForModal(match);
+      }
     }
   }, [reports]);
 
   // Urgent count (P0)
-  const urgentCount = reports.filter((r) => r.urgency === 'P0' && r.status !== 'rescued').length;
+  const urgentCount = reports.filter((r) => r.urgency === 'P0' && r.status !== 'rescued' && r.status !== 'closed').length;
 
-  // Handler: when user creates new report
-  const handleCreateReport = (newReport: StrayReport) => {
-    setReports((prev) => [newReport, ...prev]);
+  // Handler: citizen or user creates new report
+  const handleCreateReport = async (newReport: StrayReport) => {
+    // 1. Optimistic update
+    setReports((prev) => [newReport, ...prev.filter((r) => r.id !== newReport.id)]);
     setJustSubmittedReport(newReport);
+
+    if (newReport.reporterEmail) {
+      setEmailConfirmationBanner({
+        caseId: newReport.id,
+        email: newReport.reporterEmail,
+      });
+    }
+
+    // 2. Persist to Firestore
+    try {
+      await createCaseInFirestore(newReport);
+    } catch (e) {
+      console.error('Failed to create case in Firestore:', e);
+    }
   };
 
-  // Handler: volunteer updates case status
-  const handleUpdateStatus = (reportId: string, newStatus: CaseStatus) => {
+  // Handler: update case status (rescuer or admin)
+  const handleUpdateStatus = async (reportId: string, newStatus: CaseStatus) => {
+    // Optimistic UI update
     setReports((prev) =>
       prev.map((r) => (r.id === reportId ? { ...r, status: newStatus } : r))
     );
@@ -61,6 +114,46 @@ export default function App() {
     }
     if (justSubmittedReport && justSubmittedReport.id === reportId) {
       setJustSubmittedReport((prev) => (prev ? { ...prev, status: newStatus } : null));
+    }
+
+    // Persist to Firestore
+    try {
+      await updateCaseStatusInFirestore(reportId, newStatus);
+    } catch (e) {
+      console.error('Failed to update case status in Firestore:', e);
+    }
+  };
+
+  // Handler: admin delete case
+  const handleDeleteCase = async (caseId: string) => {
+    setReports((prev) => prev.filter((r) => r.id !== caseId));
+    if (selectedReportForModal?.id === caseId) {
+      setSelectedReportForModal(null);
+    }
+    try {
+      await deleteCaseInFirestore(caseId);
+    } catch (e) {
+      console.error('Failed to delete case in Firestore:', e);
+    }
+  };
+
+  // Handler: create NGO in Firestore
+  const handleCreateNGO = async (newNGO: NGOOrganization) => {
+    setNgos((prev) => [...prev, newNGO]);
+    try {
+      await createNGOInFirestore(newNGO);
+    } catch (e) {
+      console.error('Failed to save NGO to Firestore:', e);
+    }
+  };
+
+  // Handler: delete NGO from Firestore
+  const handleDeleteNGO = async (ngoId: string) => {
+    setNgos((prev) => prev.filter((n) => n.id !== ngoId));
+    try {
+      await deleteNGOInFirestore(ngoId);
+    } catch (e) {
+      console.error('Failed to delete NGO from Firestore:', e);
     }
   };
 
@@ -93,6 +186,7 @@ export default function App() {
           status: 'acknowledged' as const,
         };
 
+        // Update local state
         setReports((prev) =>
           prev.map((r) =>
             r.id === targetReport.id
@@ -111,9 +205,24 @@ export default function App() {
             prev ? { ...prev, status: 'in_progress', dispatchedToNGO: dispatchPayload } : null
           );
         }
+
+        // Persist dispatch in Firestore
+        await updateCaseStatusInFirestore(targetReport.id, 'in_progress', dispatchPayload);
       }
     } catch (err) {
       console.error('Dispatch error:', err);
+    }
+  };
+
+  // Handler: NGO capacity status update
+  const handleUpdateNGOCapacity = async (ngoId: string, capacity: 'available' | 'busy' | 'full') => {
+    setNgos((prev) =>
+      prev.map((n) => (n.id === ngoId ? { ...n, capacityStatus: capacity } : n))
+    );
+    try {
+      await updateNGOCapacity(ngoId, capacity);
+    } catch (e) {
+      console.error('Failed to update NGO capacity in Firestore:', e);
     }
   };
 
@@ -128,18 +237,31 @@ export default function App() {
       {/* Top Navigation */}
       <Navbar
         currentTab={currentTab}
-        onSelectTab={(tab) => {
-          setCurrentTab(tab);
-          if (tab === 'report') {
-            // keep or reset as needed
-          }
-        }}
+        onSelectTab={(tab) => setCurrentTab(tab)}
         onOpenGuide={() => setShowGuideModal(true)}
         urgentCount={urgentCount}
       />
 
       {/* Main App Canvas */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+        {/* Email confirmation toast / alert if citizen just submitted */}
+        {emailConfirmationBanner && (
+          <div className="mb-6 p-4 rounded-2xl bg-emerald-600 text-white shadow-md flex items-center justify-between gap-3 text-xs sm:text-sm">
+            <div className="flex items-center gap-2.5">
+              <Mail className="w-5 h-5 text-emerald-200 shrink-0" />
+              <span>
+                <strong>通報立案成功！</strong> 個案編號 <code>#{emailConfirmationBanner.caseId}</code> 已同步寄發確認信與進度追蹤連結至 <strong>{emailConfirmationBanner.email}</strong>。
+              </span>
+            </div>
+            <button
+              onClick={() => setEmailConfirmationBanner(null)}
+              className="text-white hover:text-emerald-200 font-bold px-2 py-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* P0 Urgent Alert Banner if there are active P0 cases */}
         {urgentCount > 0 && currentTab !== 'cases' && (
           <div className="mb-6 p-3.5 px-4 rounded-2xl bg-rose-600 text-white shadow-md flex items-center justify-between gap-3 text-xs sm:text-sm">
@@ -149,12 +271,21 @@ export default function App() {
                 目前有 {urgentCount} 宗 P0 極度危急傷病動物通報，急需救助隊馳援！
               </span>
             </div>
-            <button
-              onClick={() => setCurrentTab('cases')}
-              className="px-3 py-1 rounded-xl bg-white text-rose-700 font-bold hover:bg-rose-50 transition-colors shrink-0 text-xs"
-            >
-              檢視危急個案 →
-            </button>
+            <div className="flex items-center gap-2">
+              <a
+                href="tel:27111000"
+                className="hidden sm:inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-rose-800 hover:bg-rose-900 text-white font-bold text-xs"
+              >
+                <PhoneCall className="w-3.5 h-3.5 text-rose-300" />
+                SPCA 24h 熱線
+              </a>
+              <button
+                onClick={() => setCurrentTab('cases')}
+                className="px-3 py-1 rounded-xl bg-white text-rose-700 font-bold hover:bg-rose-50 transition-colors shrink-0 text-xs cursor-pointer"
+              >
+                檢視危急個案 →
+              </button>
+            </div>
           </div>
         )}
 
@@ -171,10 +302,10 @@ export default function App() {
                     </div>
                     <div>
                       <h3 className="font-bold text-base sm:text-lg text-emerald-950">
-                        通報成功！個案編號：{justSubmittedReport.id}
+                        通報成功並存入雲端！個案編號：{justSubmittedReport.id}
                       </h3>
                       <p className="text-xs text-emerald-900 mt-0.5">
-                        Gemini 多模態 AI 已完成傷病評估，並已自動匹配鄰近合適 NGO 救助隊。
+                        照片已妥善儲存至 Cloud Storage，Gemini 多模態 AI 已完成傷病評估，並已自動匹配鄰近合適 NGO 救助隊。
                       </p>
                     </div>
                   </div>
@@ -182,14 +313,14 @@ export default function App() {
                   <div className="flex items-center gap-2 w-full sm:w-auto">
                     <button
                       onClick={() => handleNavigateToMap(justSubmittedReport.location)}
-                      className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-stone-900 text-white hover:bg-stone-800 text-xs font-bold transition-colors shadow-xs"
+                      className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-stone-900 text-white hover:bg-stone-800 text-xs font-bold transition-colors shadow-xs cursor-pointer"
                     >
                       <MapPin className="w-4 h-4 text-rose-400" />
                       在地圖查看位置
                     </button>
                     <button
                       onClick={() => setJustSubmittedReport(null)}
-                      className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-white border border-stone-300 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors shadow-2xs"
+                      className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-white border border-stone-300 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors shadow-2xs cursor-pointer"
                     >
                       通報新個案
                     </button>
@@ -211,7 +342,10 @@ export default function App() {
             ) : (
               /* Report Input Form */
               <div className="max-w-3xl mx-auto">
-                <ReportForm onSubmitReport={handleCreateReport} />
+                <ReportForm
+                  ngos={ngos}
+                  onSubmitReport={handleCreateReport}
+                />
               </div>
             )}
           </div>
@@ -223,7 +357,7 @@ export default function App() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-stone-900">
-                  全港流浪動物救援即時地圖
+                  全港流浪動物救援即時地圖 (Firestore 實時同步)
                 </h2>
                 <p className="text-xs text-stone-500">
                   即時標註待救援貓狗個案（紅：P0危急／橙：P1醫療／綠：P2穩定）與 NGO 庇護站位置
@@ -232,7 +366,7 @@ export default function App() {
 
               <button
                 onClick={() => setCurrentTab('report')}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 text-white font-bold text-xs shadow-xs hover:bg-amber-600 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 text-white font-bold text-xs shadow-xs hover:bg-amber-600 transition-colors cursor-pointer"
               >
                 + 即時通報新個案
               </button>
@@ -240,6 +374,7 @@ export default function App() {
 
             <InteractiveMap
               reports={reports}
+              ngos={ngos}
               selectedReportId={selectedReportForModal?.id}
               onSelectReport={(report) => setSelectedReportForModal(report)}
               centerCoords={mapCenter}
@@ -253,16 +388,16 @@ export default function App() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-stone-900">
-                  通報個案動態與救援進度 ({reports.length} 宗)
+                  通報個案動態與救援進度 ({reports.length} 宗 · 實時雲端共享)
                 </h2>
                 <p className="text-xs text-stone-500">
-                  市民通報、AI 診斷要點、配對機構與志工出勤狀態即時匯整
+                  全體市民與救援機構共享動態牆，任何新通報與狀態變更將即時同步
                 </p>
               </div>
 
               <button
                 onClick={() => setCurrentTab('report')}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 text-white font-bold text-xs shadow-xs hover:bg-amber-600 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 text-white font-bold text-xs shadow-xs hover:bg-amber-600 transition-colors cursor-pointer"
               >
                 + 我要通報
               </button>
@@ -277,7 +412,25 @@ export default function App() {
         )}
 
         {/* Tab 4: NGO DIRECTORY */}
-        {currentTab === 'ngos' && <NGODirectory />}
+        {currentTab === 'ngos' && (
+          <NGODirectory
+            ngos={ngos}
+            onUpdateCapacity={handleUpdateNGOCapacity}
+          />
+        )}
+
+        {/* Tab 5: ADMIN BACKSTAGE */}
+        {currentTab === 'admin' && (
+          <AdminDashboard
+            reports={reports}
+            ngos={ngos}
+            onUpdateCaseStatus={handleUpdateStatus}
+            onDeleteCase={handleDeleteCase}
+            onUpdateNGOCapacity={handleUpdateNGOCapacity}
+            onCreateNGO={handleCreateNGO}
+            onDeleteNGO={handleDeleteNGO}
+          />
+        )}
       </main>
 
       {/* Footer */}
@@ -286,10 +439,10 @@ export default function App() {
           <div className="flex items-center justify-center gap-2 text-stone-700 font-bold">
             <span>PawPulse 流浪動物即時通報與救助媒合系統</span>
             <span>·</span>
-            <span>Google Gemini 多模態 AI 驅動</span>
+            <span>Firebase 雲端持久化 × Google Gemini 多模態 AI</span>
           </div>
           <p className="max-w-xl mx-auto text-stone-400">
-            旨在加快市民即時通報流浪／受傷動物反應速度，自動媒合鄰近合適 NGO，降低義工盲目搜尋時間。若遇嚴重緊急動物車禍危難，請同時直接撥打熱線電話。
+            依照香港《個人資料（私隱）條例》保護通報者私隱。若遇嚴重緊急車禍或瀕危動物，請同時致電 SPCA 24 小時熱線 2711 1000。
           </p>
         </div>
       </footer>
@@ -301,6 +454,7 @@ export default function App() {
           onClose={() => setSelectedReportForModal(null)}
           onUpdateStatus={handleUpdateStatus}
           onDispatchToNGO={handleDispatchToNGO}
+          onDeleteCase={handleDeleteCase}
         />
       )}
 
@@ -309,5 +463,13 @@ export default function App() {
         <EmergencyGuideModal onClose={() => setShowGuideModal(false)} />
       )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }

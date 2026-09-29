@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { StrayReport, NGOOrganization, UrgencyLevel, AnimalType } from '../types';
-import { INITIAL_NGOS } from '../data/mockNGOs';
 import { getGoogleMapsDirectionsUrl } from '../utils/location';
 import L from 'leaflet';
 import { MapPin, Filter, ExternalLink, Sparkles, Building2, Phone, AlertTriangle } from 'lucide-react';
 
 interface InteractiveMapProps {
   reports: StrayReport[];
+  ngos?: NGOOrganization[];
   selectedReportId?: string;
   onSelectReport: (report: StrayReport) => void;
   centerCoords?: { lat: number; lng: number };
@@ -14,6 +14,7 @@ interface InteractiveMapProps {
 
 export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   reports,
+  ngos = [],
   selectedReportId,
   onSelectReport,
   centerCoords,
@@ -146,8 +147,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     });
 
     // 2. Render NGO Organization Markers
-    if (showNGOs) {
-      INITIAL_NGOS.forEach((ngo) => {
+    if (showNGOs && ngos && ngos.length > 0) {
+      ngos.forEach((ngo) => {
         const ngoIcon = L.divIcon({
           className: 'custom-ngo-pin',
           html: `
@@ -287,6 +288,14 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           </label>
         </div>
       </div>
+
+      {/* Empty State Banner if 0 reports */}
+      {reports.length === 0 && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-white/95 backdrop-blur px-4 py-2.5 rounded-2xl border border-stone-200 shadow-lg text-xs text-stone-700 font-medium flex items-center gap-2 pointer-events-auto">
+          <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+          <span>目前 Firestore 資料庫中尚無待救援個案標記</span>
+        </div>
+      )}
 
       {/* Actual Leaflet Map Canvas */}
       <div ref={mapContainerRef} className="w-full h-full" />

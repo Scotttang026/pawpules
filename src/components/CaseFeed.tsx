@@ -149,10 +149,20 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
       </div>
 
       {/* Case List Cards */}
-      {filteredReports.length === 0 ? (
+      {reports.length === 0 ? (
+        <div className="bg-white rounded-3xl border border-stone-200 p-12 text-center text-stone-500 shadow-xs space-y-3">
+          <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 mx-auto">
+            <ShieldAlert className="w-7 h-7" />
+          </div>
+          <h3 className="text-base font-bold text-stone-800">目前雲端資料庫暫無任何通報個案</h3>
+          <p className="text-xs text-stone-500 max-w-md mx-auto leading-relaxed">
+            所有個案資料與相片直接自 Firebase Firestore 與 Cloud Storage 即時抓取。一旦有熱心市民通報，將立即實時同步呈現在此動態牆。
+          </p>
+        </div>
+      ) : filteredReports.length === 0 ? (
         <div className="bg-white rounded-2xl border border-stone-200 p-12 text-center text-stone-500">
           <ShieldAlert className="w-8 h-8 text-stone-300 mx-auto mb-2" />
-          <p className="text-sm font-semibold text-stone-700">沒有符合條件的個案</p>
+          <p className="text-sm font-semibold text-stone-700">沒有符合搜尋篩選條件的個案</p>
           <p className="text-xs text-stone-400 mt-1">您可以嘗試調整篩選器或重設搜尋關鍵字</p>
         </div>
       ) : (

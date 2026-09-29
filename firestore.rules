@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (request.auth.token.email == "scotttang026jp@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isValidCase(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.animalType in ['cat', 'dog', 'bird', 'other'] &&
+        data.urgency in ['P0', 'P1', 'P2'] &&
+        data.status in ['pending', 'in_progress', 'rescued', 'closed'] &&
+        data.description is string && data.description.size() <= 2000 &&
+        (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 1500)) &&
+        (!('reporterName' in data) || (data.reporterName is string && data.reporterName.size() <= 100)) &&
+        (!('reporterEmail' in data) || (data.reporterEmail is string && data.reporterEmail.size() <= 120)) &&
+        (!('reporterPhone' in data) || (data.reporterPhone is string && data.reporterPhone.size() <= 50));
+    }
+
+    // Cases collection: Public stray reports can be read so rescuers and citizens see live animal needs
+    match /cases/{caseId} {
+      allow read: if true;
+      allow create: if isValidId(caseId) && isValidCase(incoming());
+      allow update: if isValidId(caseId) && (
+        isAdmin() ||
+        (
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'dispatchedToNGO', 'updatedAt']) &&
+          incoming().status in ['pending', 'in_progress', 'rescued', 'closed']
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    // NGO directory: readable by everyone, can be created/seeded, updates/deletions restricted to admin
+    match /ngos/{ngoId} {
+      allow read: if true;
+      allow create: if isValidId(ngoId) && incoming().name is string;
+      allow update, delete: if isAdmin();
+    }
+
+    // Admins collection: registry for role verification
+    match /admins/{adminUid} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

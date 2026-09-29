@@ -2,7 +2,7 @@ export type AnimalType = 'cat' | 'dog' | 'other';
 
 export type UrgencyLevel = 'P0' | 'P1' | 'P2'; // P0: 極度緊急(重傷/瀕危), P1: 需醫療關注(骨折/明顯傷病), P2: 穩定(走失/幼崽/普通救助)
 
-export type CaseStatus = 'pending' | 'analyzed' | 'dispatched' | 'in_progress' | 'rescued';
+export type CaseStatus = 'pending' | 'analyzed' | 'dispatched' | 'in_progress' | 'rescued' | 'closed';
 
 export interface LocationCoords {
   lat: number;
@@ -39,6 +39,7 @@ export interface NGOOrganization {
   specialties: string[];
   operatingHours: string;
   hasEmergencyRescue: boolean;
+  capacityStatus?: 'available' | 'busy' | 'full';
   distanceKm?: number;
   driveTimeMins?: number;
   matchScore?: number;
@@ -54,6 +55,8 @@ export interface StrayReport {
   description: string;
   reporterName: string;
   reporterPhone: string;
+  reporterEmail?: string;
+  createdByUid?: string;
   createdAt: string;
   status: CaseStatus;
   urgency: UrgencyLevel;
@@ -63,6 +66,16 @@ export interface StrayReport {
     ngoId: string;
     ngoName: string;
     dispatchedAt: string;
-    status: 'sent' | 'acknowledged' | 'en_route';
+    status: 'sent' | 'acknowledged' | 'en_route' | 'arrived';
   };
 }
+
+export interface UserProfile {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+  role: 'admin' | 'user';
+  isAdmin: boolean;
+}
+

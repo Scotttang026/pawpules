@@ -3,13 +3,27 @@ import { StrayReport, CaseStatus } from '../types';
 import { AIAnalysisCard } from './AIAnalysisCard';
 import { NGOMatchFeedback } from './NGOMatchFeedback';
 import { getGoogleMapsDirectionsUrl } from '../utils/location';
-import { X, MapPin, Phone, User, Clock, CheckCircle2, Navigation, AlertTriangle, Activity } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  X,
+  MapPin,
+  Phone,
+  User,
+  Clock,
+  Navigation,
+  Mail,
+  Copy,
+  Check,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react';
 
 interface CaseDetailModalProps {
   report: StrayReport;
   onClose: () => void;
   onUpdateStatus: (reportId: string, newStatus: CaseStatus) => void;
   onDispatchToNGO: (ngoId: string, ngoName: string) => Promise<void>;
+  onDeleteCase?: (reportId: string) => void;
 }
 
 export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
@@ -17,24 +31,34 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
   onClose,
   onUpdateStatus,
   onDispatchToNGO,
+  onDeleteCase,
 }) => {
+  const { isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<'ai' | 'ngos'>('ai');
+  const [copiedLink, setCopiedLink] = useState(false);
 
   const statusOptions: { status: CaseStatus; label: string; color: string }[] = [
     { status: 'pending', label: '待處理', color: 'bg-stone-100 text-stone-700' },
-    { status: 'analyzed', label: 'AI已診斷', color: 'bg-amber-100 text-amber-800' },
-    { status: 'in_progress', label: '救援中 / 義工出動', color: 'bg-blue-100 text-blue-800' },
+    { status: 'in_progress', label: '救援前往中 / 接案', color: 'bg-blue-100 text-blue-800' },
     { status: 'rescued', label: '已成功救助安置', color: 'bg-emerald-100 text-emerald-800' },
+    { status: 'closed', label: '已結案', color: 'bg-stone-200 text-stone-800' },
   ];
+
+  const handleCopyTrackingLink = () => {
+    const url = `${window.location.origin}/?caseId=${encodeURIComponent(report.id)}`;
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto" id="case-detail-modal">
       <div className="relative w-full max-w-4xl bg-white rounded-3xl shadow-2xl border border-stone-200 overflow-hidden my-auto max-h-[92vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 sm:p-5 border-b border-stone-200 bg-stone-50">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 truncate">
             <span
-              className={`px-3 py-1 rounded-full text-xs font-bold text-white ${
+              className={`px-3 py-1 rounded-full text-xs font-bold text-white shrink-0 ${
                 report.urgency === 'P0'
                   ? 'bg-rose-600 animate-pulse'
                   : report.urgency === 'P1'
@@ -47,14 +71,43 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
             <h2 className="font-bold text-base sm:text-lg text-stone-900 truncate">
               {report.title}
             </h2>
+            <span className="text-2xs font-mono text-stone-500 bg-stone-200/80 px-2 py-0.5 rounded shrink-0">
+              #{report.id}
+            </span>
           </div>
 
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-stone-200 hover:bg-stone-300 text-stone-700 flex items-center justify-center transition-colors text-xs font-bold"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCopyTrackingLink}
+              className="p-1.5 sm:px-2.5 sm:py-1 rounded-xl bg-white border border-stone-300 hover:bg-stone-100 text-stone-700 flex items-center gap-1.5 transition-colors text-2xs font-bold"
+              title="複製案件專屬追蹤連結"
+            >
+              {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">{copiedLink ? '已複製連結' : '分享追蹤連結'}</span>
+            </button>
+
+            {isAdmin && onDeleteCase && (
+              <button
+                onClick={() => {
+                  if (confirm(`管理員確認：確定要永久刪除個案 #${report.id}？`)) {
+                    onDeleteCase(report.id);
+                    onClose();
+                  }
+                }}
+                className="p-1.5 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-colors"
+                title="管理員刪除個案"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
+
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-stone-200 hover:bg-stone-300 text-stone-700 flex items-center justify-center transition-colors text-xs font-bold"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Content */}
@@ -82,17 +135,25 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4 flex-wrap pt-2 border-t border-stone-200/60">
+                <div className="flex items-center gap-4 flex-wrap pt-2 border-t border-stone-200/60 text-2xs">
                   <div className="flex items-center gap-1.5 text-stone-600">
                     <User className="w-3.5 h-3.5 text-stone-400" />
                     <span>通報人：<strong>{report.reporterName}</strong></span>
                   </div>
-                  <div className="flex items-center gap-1.5 text-stone-600">
-                    <Phone className="w-3.5 h-3.5 text-stone-400" />
-                    <a href={`tel:${report.reporterPhone}`} className="text-blue-600 font-bold hover:underline">
-                      {report.reporterPhone}
-                    </a>
-                  </div>
+                  {report.reporterPhone && report.reporterPhone !== '未填寫' && (
+                    <div className="flex items-center gap-1.5 text-stone-600">
+                      <Phone className="w-3.5 h-3.5 text-stone-400" />
+                      <a href={`tel:${report.reporterPhone}`} className="text-blue-600 font-bold hover:underline">
+                        {report.reporterPhone}
+                      </a>
+                    </div>
+                  )}
+                  {report.reporterEmail && (
+                    <div className="flex items-center gap-1.5 text-stone-600">
+                      <Mail className="w-3.5 h-3.5 text-stone-400" />
+                      <span className="text-stone-700">{report.reporterEmail}</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-1.5 text-stone-500">
                     <Clock className="w-3.5 h-3.5 text-stone-400" />
                     <span>{new Date(report.createdAt).toLocaleString()}</span>
@@ -107,11 +168,19 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                 </div>
               </div>
 
-              {/* Status Updater for Volunteers / Rescuers */}
+              {/* Status Updater for Volunteers / Rescuers / Admins */}
               <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-200">
-                <span className="text-xs font-bold text-amber-900 block mb-2">
-                  🛠️ 救援進度追蹤 (義工／機構協作)：
-                </span>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-amber-600" />
+                    救援進度狀態 (Firestore 即時共享)：
+                  </span>
+                  {isAdmin && (
+                    <span className="text-2xs bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full font-bold">
+                      管理員可任意變更
+                    </span>
+                  )}
+                </div>
                 <div className="flex flex-wrap gap-2">
                   {statusOptions.map((opt) => (
                     <button

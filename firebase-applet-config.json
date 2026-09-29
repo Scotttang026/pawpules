@@ -1,0 +1,12 @@
+{
+  "projectId": "pawpulseai",
+  "appId": "1:302435171171:web:38ef285303afbf35cff156",
+  "apiKey": "AIzaSyBs8bkhqBKm2FUiAlZPqfrt_sj33RugaAE",
+  "authDomain": "pawpulseai.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-pawpules-eda4ba81-50a4-4f01-905a-f931c3008e87",
+  "storageBucket": "pawpulseai.firebasestorage.app",
+  "messagingSenderId": "302435171171",
+  "measurementId": "",
+  "oAuthClientId": "302435171171-718lbc7qipoeucljuo8rrdc0jn1c7edp.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
+}

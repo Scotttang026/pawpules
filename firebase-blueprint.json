@@ -1,0 +1,139 @@
+{
+  "entities": {
+    "Case": {
+      "title": "Stray Animal Rescue Case",
+      "description": "A reported stray or injured animal case requiring rescue coordination",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the case",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "animalType": {
+          "type": "string",
+          "description": "Type of animal reported",
+          "enum": ["cat", "dog", "bird", "other"]
+        },
+        "urgency": {
+          "type": "string",
+          "description": "Triage urgency level",
+          "enum": ["P0", "P1", "P2"]
+        },
+        "status": {
+          "type": "string",
+          "description": "Current workflow status of the rescue case",
+          "enum": ["pending", "in_progress", "rescued", "closed"]
+        },
+        "description": {
+          "type": "string",
+          "description": "Citizen provided description and context",
+          "maxLength": 1000
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "Cloud Storage public URL of the uploaded animal photo",
+          "maxLength": 1000
+        },
+        "reporterName": {
+          "type": "string",
+          "description": "Name or pseudonym of reporting citizen",
+          "maxLength": 100
+        },
+        "reporterPhone": {
+          "type": "string",
+          "description": "Contact phone for rescue follow-up",
+          "maxLength": 50
+        },
+        "reporterEmail": {
+          "type": "string",
+          "description": "Email address for case confirmation and tracking",
+          "maxLength": 120
+        },
+        "createdByUid": {
+          "type": "string",
+          "description": "Auth UID or anonymous identifier of the reporter",
+          "maxLength": 128
+        }
+      },
+      "required": ["id", "animalType", "urgency", "status", "description"]
+    },
+    "NGO": {
+      "title": "Non-Governmental Animal Welfare Organization",
+      "description": "Registered rescue organization participating in rescue dispatch",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identifier of the NGO",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full formal name of the NGO",
+          "maxLength": 100
+        },
+        "shortName": {
+          "type": "string",
+          "description": "Abbreviated brand name",
+          "maxLength": 50
+        },
+        "emergencyPhone": {
+          "type": "string",
+          "description": "Emergency dispatch phone number",
+          "maxLength": 50
+        },
+        "capacityStatus": {
+          "type": "string",
+          "description": "Operational capacity status",
+          "enum": ["available", "busy", "full"]
+        },
+        "operatingHours": {
+          "type": "string",
+          "description": "Hours of emergency operations",
+          "maxLength": 100
+        }
+      },
+      "required": ["id", "name", "emergencyPhone", "capacityStatus"]
+    },
+    "Admin": {
+      "title": "Platform Administrator",
+      "description": "Authorized administrator record for role-based access control",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "User UID of admin",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "description": "Admin email address",
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "description": "Role string",
+          "enum": ["admin", "superadmin"]
+        }
+      },
+      "required": ["uid", "email", "role"]
+    }
+  },
+  "firestore": {
+    "/cases/{caseId}": {
+      "schema": "Case",
+      "description": "Collection of all stray animal rescue reports submitted by citizens"
+    },
+    "/ngos/{ngoId}": {
+      "schema": "NGO",
+      "description": "Directory of registered rescue organizations and active status"
+    },
+    "/admins/{adminUid}": {
+      "schema": "Admin",
+      "description": "Registry of authorized platform administrator accounts"
+    }
+  }
+}
