@@ -13,6 +13,9 @@ const PORT = Number(process.env.PORT) || 3000;
 // 如實際部署喺反向代理（Nginx、Cloud Run、Render 等）後面，設定信任第一層 proxy
 app.set("trust proxy", 1);
 
+// ✅ [修正 Bug C] 補回缺失的 Nominatim User-Agent 常數宣告
+const NOMINATIM_USER_AGENT = "PawPulse-RescuePlatform/1.0 (contact@pawpulse.app)";
+
 class SlidingWindowLimiter {
   private inMemoryStore = new Map<string, number[]>();
 
@@ -64,12 +67,10 @@ const uploadRateLimitMiddleware = async (req: Request, res: Response, next: () =
   next();
 };
 
-
 // 統一嘅 Client IP 擷取函式，供所有 rate-limit middleware 共用
 function getClientIp(req: Request): string {
   return req.ip || req.socket.remoteAddress || "unknown";
 }
-
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
@@ -96,9 +97,19 @@ function getGeminiApiKey(): string | undefined {
 let aiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
   const apiKey = getGeminiApiKey();
+
+  // ✅ [修正 Bug A] 如果攞唔到 key，即刻清晰拋錯，唔好等 SDK 靜雞雞 fallback 去 Vertex AI OAuth 模式
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY (或其他相容名稱) 未設定，無法初始化 Gemini client");
+  }
+
   if (!aiClient) {
     aiClient = new GoogleGenAI({
       apiKey,
+      // ✅ [修正 Bug A] 明確強制使用 Gemini Developer API 模式（API key 認證）
+      // 避免 SDK 在 GCP 環境（Cloud Run）自動偵測並切換去 Vertex AI 的 OAuth2/ADC 認證方式，
+      // 導致出現 401 ACCESS_TOKEN_TYPE_UNSUPPORTED 錯誤。
+      vertexai: false,
       httpOptions: { headers: { "User-Agent": "aistudio-build" } },
     });
   }
@@ -114,13 +125,11 @@ app.get("/api/ai/status", (_req: Request, res: Response) => {
   res.json({
     status: key ? "configured" : "missing_key",
     hasApiKey: !!key,
-    // ⚠️ 請自行對照 @google/genai 官方文件核對呢個型號名稱是否真實有效
     model: "gemini-3.8-flash",
   });
 });
 
-
-// ---------- Geocoding (Google Maps Platform，自動 fallback 至 Nominatim) ----------
+// ---------- Geocoding (Google Maps Platform，全球適用，無地區限制) ----------
 
 function getGoogleMapsApiKey(): string | undefined {
   return process.env.GOOGLE_MAPS_API_KEY;
@@ -136,19 +145,19 @@ const geocodeRateLimitMiddleware = async (req: Request, res: Response, next: Nex
   next();
 };
 
-// server.ts — 取代原本用 Nominatim 嘅 /api/geocode 路由
-// server.ts — /api/geocode 路由（全球適用版本）
-app.get('/api/geocode', async (req, res) => {
+app.get("/api/geocode", geocodeRateLimitMiddleware, async (req: Request, res: Response) => {
   const { address } = req.query;
 
-  if (!address || typeof address !== 'string') {
-    return res.status(400).json({ error: 'Missing address parameter' });
+  if (!address || typeof address !== "string") {
+    res.status(400).json({ error: "Missing address parameter" });
+    return;
   }
 
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  const apiKey = getGoogleMapsApiKey();
   if (!apiKey) {
-    console.error('[Geocode] GOOGLE_MAPS_API_KEY not set in environment');
-    return res.status(500).json({ error: 'Geocoding service not configured' });
+    console.error("[Geocode] GOOGLE_MAPS_API_KEY not set in environment");
+    res.status(500).json({ error: "Geocoding service not configured" });
+    return;
   }
 
   try {
@@ -159,14 +168,12 @@ app.get('/api/geocode', async (req, res) => {
       // 不設 region / components / language，讓 Google 自行判斷全球地址
 
     const response = await fetch(url);
-    const data = await response.json();
+    const data: any = await response.json();
 
-    if (data.status !== 'OK' || !data.results || data.results.length === 0) {
-      console.warn('[Geocode] No results:', data.status, data.error_message);
-      return res.status(404).json({
-        error: 'Address not found',
-        status: data.status,
-      });
+    if (data.status !== "OK" || !data.results || data.results.length === 0) {
+      console.warn("[Geocode] No results:", data.status, data.error_message);
+      res.status(404).json({ error: "Address not found", status: data.status });
+      return;
     }
 
     const result = data.results[0];
@@ -179,11 +186,10 @@ app.get('/api/geocode', async (req, res) => {
       locationType: result.geometry.location_type,
     });
   } catch (error) {
-    console.error('[Geocode] Error:', error);
-    res.status(500).json({ error: 'Geocoding request failed' });
+    console.error("[Geocode] Error:", error);
+    res.status(500).json({ error: "Geocoding request failed" });
   }
 });
-
 
 app.get("/api/reverse-geocode", geocodeRateLimitMiddleware, async (req: Request, res: Response) => {
   const lat = parseFloat(String(req.query.lat));
@@ -228,7 +234,6 @@ app.get("/api/reverse-geocode", geocodeRateLimitMiddleware, async (req: Request,
 
   res.status(404).json({ error: "找不到對應地址" });
 });
-
 
 // 驗證真正檔案內容（magic bytes），唔淨係信任副檔名／宣稱嘅 MIME type
 function detectImageType(buffer: Buffer): "jpg" | "png" | "webp" | null {
@@ -349,8 +354,6 @@ Ensure output is strictly JSON conforming to the response schema.
 
     let analysisResult: AIAnalysisResult | null = null;
     const apiKey = getGeminiApiKey();
-    console.log('[Gemini Debug] promptFeedback:', JSON.stringify(result.response.promptFeedback));
-    console.log('[Gemini Debug] candidates:', JSON.stringify(result.response.candidates));
 
     if (apiKey) {
       try {
@@ -388,6 +391,11 @@ Ensure output is strictly JSON conforming to the response schema.
           },
         });
 
+        // ✅ [修正 Bug B] debug log 移去呢個位置，用真正已定義嘅 `response` 變數，
+        // 而唔係之前錯誤噤引用一個未定義嘅 `result`
+        console.log("[Gemini Debug] promptFeedback:", JSON.stringify((response as any)?.promptFeedback));
+        console.log("[Gemini Debug] candidates length:", (response as any)?.candidates?.length ?? 0);
+
         const rawText = response.text;
         if (rawText) {
           const parsed = JSON.parse(rawText);
@@ -397,10 +405,14 @@ Ensure output is strictly JSON conforming to the response schema.
             confidenceScore: parsed.confidenceScore || 0.92,
             analyzedAt: new Date().toISOString(),
           };
+        } else {
+          console.warn("[Gemini Debug] response.text is empty. Full response:", JSON.stringify(response));
         }
       } catch (geminiError) {
         console.warn("Gemini API call failed or timed out:", geminiError);
       }
+    } else {
+      console.error("[Gemini] No API key available — skipping Gemini call");
     }
 
     if (!analysisResult) {
@@ -492,10 +504,6 @@ app.post("/api/ngo/notify", (req: Request, res: Response) => {
 
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
-    // ⚠️ 已改用動態 import(),取代原本嘅 top-level 靜態 import。
-    // 呢個改動令 vite 套件只喺真正進入呢個 if 分支(即係開發環境)
-    // 先會被 require(),production 環境完全唔會觸發呢句,先可以
-    // 安全噉將 vite 由 "dependencies" 移去 "devDependencies"。
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -515,6 +523,4 @@ async function startServer() {
   });
 }
 
-
 startServer();
-
