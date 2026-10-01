@@ -180,6 +180,8 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     setStatusMessage('正在搜尋地址座標...');
 
     const result = await geocodeAddressQuery(manualAddressInput.trim());
+    console.log("[Google Map Debug] Address result:", 
+        JSON.stringify(result, null, 2));
     if (result) {
       setLocation({
         lat: result.lat,
