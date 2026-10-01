@@ -136,61 +136,54 @@ const geocodeRateLimitMiddleware = async (req: Request, res: Response, next: Nex
   next();
 };
 
-// ⚠️ 伺服器端 Node.js fetch（undici）冇瀏覽器嗰種 forbidden header
-// 限制，可以自由設定 User-Agent，正確符合 Nominatim 使用政策要求。
-// 請將 email 換成你實際監控嘅聯絡地址。
-const NOMINATIM_USER_AGENT = "PawPulse/1.0 (contact: scotttang026jp@gmail.com)";
+// server.ts — 取代原本用 Nominatim 嘅 /api/geocode 路由
+// server.ts — /api/geocode 路由（全球適用版本）
+app.get('/api/geocode', async (req, res) => {
+  const { address } = req.query;
 
-app.get("/api/geocode", geocodeRateLimitMiddleware, async (req: Request, res: Response) => {
-  const address = String(req.query.address || "").trim();
-  if (!address) {
-    res.status(400).json({ error: "缺少 address 參數" });
-    return;
+  if (!address || typeof address !== 'string') {
+    return res.status(400).json({ error: 'Missing address parameter' });
   }
 
-  const googleKey = getGoogleMapsApiKey();
-
-  if (googleKey) {
-    try {
-      const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
-        address + ", Hong Kong"
-      )}&key=${googleKey}&language=zh-HK&region=hk`;
-      const r = await fetch(url);
-      const data: any = await r.json();
-      if (data.status === "OK" && data.results?.[0]) {
-        const loc = data.results[0].geometry.location;
-        res.json({ lat: loc.lat, lng: loc.lng, address: data.results[0].formatted_address, provider: "google" });
-        return;
-      }
-      console.warn("Google Geocoding API 回傳非 OK 狀態:", data.status);
-    } catch (err) {
-      console.warn("Google Geocoding API 呼叫失敗，改用 Nominatim fallback:", err);
-    }
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    console.error('[Geocode] GOOGLE_MAPS_API_KEY not set in environment');
+    return res.status(500).json({ error: 'Geocoding service not configured' });
   }
 
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-      address + ", Hong Kong"
-    )}&limit=1`;
-    const r = await fetch(url, {
-      headers: { "User-Agent": NOMINATIM_USER_AGENT, "Accept-Language": "zh-HK, zh-TW, zh, en" },
-    });
-    const results: any = await r.json();
-    if (Array.isArray(results) && results[0]) {
-      res.json({
-        lat: parseFloat(results[0].lat),
-        lng: parseFloat(results[0].lon),
-        address: results[0].display_name,
-        provider: "nominatim",
-      });
-      return;
-    }
-  } catch (err) {
-    console.error("Nominatim fallback 失敗:", err);
-  }
+    const url =
+      `https://maps.googleapis.com/maps/api/geocode/json` +
+      `?address=${encodeURIComponent(address)}` +
+      `&key=${apiKey}`;
+      // 不設 region / components / language，讓 Google 自行判斷全球地址
 
-  res.status(404).json({ error: "找不到對應地址，請嘗試更精確的地址描述" });
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.status !== 'OK' || !data.results || data.results.length === 0) {
+      console.warn('[Geocode] No results:', data.status, data.error_message);
+      return res.status(404).json({
+        error: 'Address not found',
+        status: data.status,
+      });
+    }
+
+    const result = data.results[0];
+    const { lat, lng } = result.geometry.location;
+
+    res.json({
+      lat,
+      lng,
+      formattedAddress: result.formatted_address,
+      locationType: result.geometry.location_type,
+    });
+  } catch (error) {
+    console.error('[Geocode] Error:', error);
+    res.status(500).json({ error: 'Geocoding request failed' });
+  }
 });
+
 
 app.get("/api/reverse-geocode", geocodeRateLimitMiddleware, async (req: Request, res: Response) => {
   const lat = parseFloat(String(req.query.lat));
@@ -356,6 +349,8 @@ Ensure output is strictly JSON conforming to the response schema.
 
     let analysisResult: AIAnalysisResult | null = null;
     const apiKey = getGeminiApiKey();
+    console.log('[Gemini Debug] promptFeedback:', JSON.stringify(result.response.promptFeedback));
+    console.log('[Gemini Debug] candidates:', JSON.stringify(result.response.candidates));
 
     if (apiKey) {
       try {
@@ -407,8 +402,6 @@ Ensure output is strictly JSON conforming to the response schema.
         console.warn("Gemini API call failed or timed out:", geminiError);
       }
     }
-    console.log('[Gemini Debug] promptFeedback:', JSON.stringify(result.response.promptFeedback));
-    console.log('[Gemini Debug] candidates:', JSON.stringify(result.response.candidates));
 
     if (!analysisResult) {
       res.json({ noResponse: true, message: "Gemini 沒有回應", analysisResult: null });
