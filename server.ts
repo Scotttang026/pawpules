@@ -407,6 +407,8 @@ Ensure output is strictly JSON conforming to the response schema.
         console.warn("Gemini API call failed or timed out:", geminiError);
       }
     }
+    console.log('[Gemini Debug] promptFeedback:', JSON.stringify(result.response.promptFeedback));
+    console.log('[Gemini Debug] candidates:', JSON.stringify(result.response.candidates));
 
     if (!analysisResult) {
       res.json({ noResponse: true, message: "Gemini 沒有回應", analysisResult: null });
