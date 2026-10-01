@@ -10,6 +10,8 @@ export type UrgencyLevel = 'P0' | 'P1' | 'P2'; // P0: 極度緊急(重傷/瀕危
 // 更細緻嘅分階段狀態，請同時擴充 firestore.rules 嘅 enum。
 export type CaseStatus = 'pending' | 'in_progress' | 'rescued' | 'closed';
 
+export type NGOCapacityStatus = 'available' | 'busy' | 'full';
+
 export interface LocationCoords {
   lat: number;
   lng: number;
@@ -45,11 +47,12 @@ export interface NGOOrganization {
   specialties: string[];
   operatingHours: string;
   hasEmergencyRescue: boolean;
-  capacityStatus?: 'available' | 'busy' | 'full';
+  capacityStatus?: NGOCapacityStatus;
   distanceKm?: number;
   driveTimeMins?: number;
   matchScore?: number;
 }
+
 
 export interface StrayReport {
   id: string; // Case ID

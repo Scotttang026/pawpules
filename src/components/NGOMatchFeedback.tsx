@@ -237,7 +237,7 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
                   {isDispatched ? (
                     <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      已向機構送交通報 (已接案)
+                      {isAdmin ? '已向機構送交通報 (已接案)' : '已通知機構，等候救援隊確認接案'}
                     </div>
                   ) : (
                     <button

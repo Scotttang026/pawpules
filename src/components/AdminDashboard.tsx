@@ -18,6 +18,7 @@ import {
   Sliders,
   X,
 } from 'lucide-react';
+import { fetchCaseContact, ReporterContactInfo } from '../services/caseService';
 
 interface AdminDashboardProps {
   reports: StrayReport[];
@@ -36,8 +37,6 @@ const ANIMAL_TYPE_OPTIONS: { value: AnimalType; label: string }[] = [
   { value: 'other', label: '其他' },
 ];
 
-// 防禦性座標解析：修正 falsy-zero bug（parseFloat('0') || fallback
-// 會誤判合法座標 0 為「冇輸入」），並加入合理範圍檢查
 function parseCoordinate(value: string, fallback: number, min: number, max: number): number {
   const parsed = parseFloat(value);
   if (!Number.isFinite(parsed) || parsed < min || parsed > max) return fallback;
@@ -105,7 +104,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
 
-    // 加入隨機尾碼，降低同一毫秒建立多個 NGO 時嘅 ID 碰撞風險
     const ngoId = `ngo_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const parsedLat = parseCoordinate(newNGOLat, 22.3193, -90, 90);
     const parsedLng = parseCoordinate(newNGOLng, 114.1694, -180, 180);
@@ -135,12 +133,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     resetNGOForm();
   };
 
-  // ---------- 認證狀態閘門：解決管理員登入死結問題 ----------
-  //
-  // ⚠️ 原本 App.tsx 只喺 isAdmin 為 true 時先渲染呢個組件，令未登入
-  // 嘅真正管理員永遠見唔到下面呢個登入按鈕（先決條件矛盾）。現在
-  // App.tsx 已改為無條件渲染 AdminDashboard，由呢裡自行處理三種
-  // 狀態：未登入／已登入但非管理員／已登入且是管理員。
+  const [revealedContacts, setRevealedContacts] = useState<Record<string, ReporterContactInfo | null>>({});
+  const [loadingContactId, setLoadingContactId] = useState<string | null>(null);
+
+  // ⚠️ 修正：原本用 `if (revealedContacts[caseId]) return;` 做快取判斷，
+  // 但如果 fetchCaseContact 回傳 null（真係冇 contact 文件，例如舊測試
+  // 資料），revealedContacts[caseId] 會被設成 null（falsy），下次撳按鈕
+  // 會被當做「未讀取過」而重複觸發 fetch。改用 `caseId in revealedContacts`
+  // 嚟分辨「未曾 fetch」同「fetch 完確認冇資料」兩種狀態。
+  const handleRevealContact = async (caseId: string) => {
+    if (caseId in revealedContacts) return;
+    setLoadingContactId(caseId);
+    const data = await fetchCaseContact(caseId);
+    setRevealedContacts((prev) => ({ ...prev, [caseId]: data }));
+    setLoadingContactId(null);
+  };
 
   if (!user) {
     return (
@@ -196,11 +203,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
   }
 
-  // ---------- 以下為 isAdmin === true 才會渲染嘅完整後台 ----------
-
   return (
     <div className="space-y-6" id="admin-dashboard-view">
-      {/* Admin Auth Header Banner */}
       <div className="bg-stone-900 text-white rounded-3xl p-6 shadow-xl border border-stone-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
           <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
@@ -239,7 +243,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex items-center gap-2 border-b border-stone-200 pb-3">
         <button
           onClick={() => setActiveTab('cases')}
@@ -271,7 +274,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </button>
       </div>
 
-      {/* Tab 1: Case Management */}
       {activeTab === 'cases' && (
         <div className="bg-white rounded-3xl border border-stone-200 shadow-xs overflow-hidden">
           <div className="p-4 border-b border-stone-200 bg-stone-50 flex items-center justify-between">
@@ -286,75 +288,98 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           ) : (
             <div className="divide-y divide-stone-100">
-              {reports.map((c) => (
-                <div key={c.id} className="p-4 hover:bg-stone-50/80 transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <div className="flex items-start gap-3">
-                    <img
-                      src={c.photoUrl}
-                      alt={c.title}
-                      referrerPolicy="no-referrer"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
-                      }}
-                      className="w-14 h-14 rounded-xl object-cover bg-stone-100 border border-stone-200 shrink-0"
-                    />
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-sm text-stone-900">{c.title}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-2xs font-bold text-white ${
-                          c.urgency === 'P0' ? 'bg-rose-600' : c.urgency === 'P1' ? 'bg-amber-500' : 'bg-emerald-600'
-                        }`}>
-                          {c.urgency}
-                        </span>
-                        <span className="text-2xs text-stone-500 font-mono">ID: {c.id}</span>
-                      </div>
+              {reports.map((c) => {
+                const hasFetchedContact = c.id in revealedContacts;
+                const fetchedContact = revealedContacts[c.id];
 
-                      <p className="text-xs text-stone-600 line-clamp-1 mt-0.5">{c.description}</p>
-                      <div className="flex items-center gap-3 text-2xs text-stone-500 mt-1">
-                        <span>通報人: {c.reporterName} ({c.reporterPhone || '無電話'})</span>
-                        {c.reporterEmail && (
-                          <span className="flex items-center gap-1 text-blue-600">
-                            <Mail className="w-3 h-3" />
-                            {c.reporterEmail}
+                return (
+                  <div key={c.id} className="p-4 hover:bg-stone-50/80 transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <img
+                        src={c.photoUrl}
+                        alt={c.title}
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
+                        }}
+                        className="w-14 h-14 rounded-xl object-cover bg-stone-100 border border-stone-200 shrink-0"
+                      />
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-sm text-stone-900">{c.title}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-2xs font-bold text-white ${
+                            c.urgency === 'P0' ? 'bg-rose-600' : c.urgency === 'P1' ? 'bg-amber-500' : 'bg-emerald-600'
+                          }`}>
+                            {c.urgency}
                           </span>
-                        )}
-                        <span>地點: {c.location.address}</span>
+                          <span className="text-2xs text-stone-500 font-mono">ID: {c.id}</span>
+                        </div>
+
+                        <p className="text-xs text-stone-600 line-clamp-1 mt-0.5">{c.description}</p>
+                        <div className="flex items-center gap-3 text-2xs text-stone-500 mt-1 flex-wrap">
+                          {hasFetchedContact ? (
+                            fetchedContact ? (
+                              <>
+                                <span>
+                                  通報人: {fetchedContact.reporterName || '未提供'} ({fetchedContact.reporterPhone || '無電話'})
+                                </span>
+                                {fetchedContact.reporterEmail && (
+                                  <span className="flex items-center gap-1 text-blue-600">
+                                    <Mail className="w-3 h-3" />
+                                    {fetchedContact.reporterEmail}
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-stone-400">⚠ 未能讀取聯絡資料（資料不存在或讀取被拒）</span>
+                            )
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleRevealContact(c.id)}
+                              disabled={loadingContactId === c.id}
+                              className="text-2xs text-amber-700 font-bold underline hover:text-amber-800 cursor-pointer disabled:opacity-50"
+                            >
+                              {loadingContactId === c.id ? '載入中...' : '👁 查看報案人聯絡資料'}
+                            </button>
+                          )}
+                          <span>地點: {c.location.address}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 justify-end">
-                    <select
-                      value={c.status}
-                      onChange={(e) => onUpdateCaseStatus(c.id, e.target.value as CaseStatus)}
-                      className="px-2.5 py-1.5 rounded-xl text-xs bg-stone-50 border border-stone-300 font-medium focus:ring-2 focus:ring-amber-500 focus:outline-none"
-                    >
-                      <option value="pending">待處理 (Pending)</option>
-                      <option value="in_progress">救援前往中 (In Progress)</option>
-                      <option value="rescued">已成功救助 (Rescued)</option>
-                      <option value="closed">結案 (Closed)</option>
-                    </select>
+                    <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 justify-end">
+                      <select
+                        value={c.status}
+                        onChange={(e) => onUpdateCaseStatus(c.id, e.target.value as CaseStatus)}
+                        className="px-2.5 py-1.5 rounded-xl text-xs bg-stone-50 border border-stone-300 font-medium focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      >
+                        <option value="pending">待處理 (Pending)</option>
+                        <option value="in_progress">救援前往中 (In Progress)</option>
+                        <option value="rescued">已成功救助 (Rescued)</option>
+                        <option value="closed">結案 (Closed)</option>
+                      </select>
 
-                    <button
-                      onClick={() => {
-                        if (confirm(`確認從 Firestore 永久刪除個案 #${c.id}？`)) {
-                          onDeleteCase(c.id);
-                        }
-                      }}
-                      className="p-2 rounded-xl text-rose-600 hover:bg-rose-50 transition-colors border border-rose-200 cursor-pointer"
-                      title="刪除個案"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      <button
+                        onClick={() => {
+                          if (confirm(`確認從 Firestore 永久刪除個案 #${c.id}？`)) {
+                            onDeleteCase(c.id);
+                          }
+                        }}
+                        className="p-2 rounded-xl text-rose-600 hover:bg-rose-50 transition-colors border border-rose-200 cursor-pointer"
+                        title="刪除個案"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       )}
 
-      {/* Tab 2: NGO Management */}
       {activeTab === 'ngos' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between bg-white rounded-2xl p-4 border border-stone-200">
@@ -451,7 +476,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* Tab 3: System Logs & Monitoring */}
       {activeTab === 'logs' && (
         <div className="bg-stone-950 text-stone-200 rounded-3xl p-5 border border-stone-800 shadow-xl space-y-4 font-mono">
           <div className="flex items-center justify-between border-b border-stone-800 pb-3">
@@ -498,7 +522,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* Add NGO Modal */}
       {showAddNGOModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-stone-200 space-y-4 max-h-[90vh] overflow-y-auto">

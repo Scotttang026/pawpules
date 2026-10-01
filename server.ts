@@ -1,4 +1,4 @@
-import express, { Request, Response } from "express";
+import express, { NextFunction, Request, Response } from "express";
 import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
@@ -45,8 +45,7 @@ class SlidingWindowLimiter {
 const rateLimiter = new SlidingWindowLimiter();
 
 const aiRateLimitMiddleware = async (req: Request, res: Response, next: () => void) => {
-  const clientIp = req.ip || req.socket.remoteAddress || "unknown";
-  const { allowed, remaining } = await rateLimiter.isAllowed(`ai_${clientIp}`, 15, 60);
+  const { allowed, remaining } = await rateLimiter.isAllowed(`ai_${getClientIp(req)}`, 15, 60);
   res.setHeader("X-RateLimit-Remaining", remaining);
   if (!allowed) {
     res.status(429).json({ error: "請求過於頻繁，請稍候 1 分鐘後再試 (Rate limit exceeded)" });
@@ -56,8 +55,7 @@ const aiRateLimitMiddleware = async (req: Request, res: Response, next: () => vo
 };
 
 const uploadRateLimitMiddleware = async (req: Request, res: Response, next: () => void) => {
-  const clientIp = req.ip || req.socket.remoteAddress || "unknown";
-  const { allowed, remaining } = await rateLimiter.isAllowed(`upload_${clientIp}`, 20, 60);
+  const { allowed, remaining } = await rateLimiter.isAllowed(`upload_${getClientIp(req)}`, 20, 60);
   res.setHeader("X-RateLimit-Remaining", remaining);
   if (!allowed) {
     res.status(429).json({ error: "上傳過於頻繁，請稍候再試" });
@@ -65,6 +63,13 @@ const uploadRateLimitMiddleware = async (req: Request, res: Response, next: () =
   }
   next();
 };
+
+
+// 統一嘅 Client IP 擷取函式，供所有 rate-limit middleware 共用
+function getClientIp(req: Request): string {
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
+
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));

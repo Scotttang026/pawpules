@@ -22,6 +22,7 @@ import {
   createNGOInFirestore,
   deleteNGOInFirestore,
   updateNGOCapacity,
+  fetchCaseContact,
   CASE_COLLECTION,
 } from './services/caseService';
 import {
@@ -61,12 +62,14 @@ function AppContent() {
     };
   }, []);
 
-  // ⚠️ 已補回 getDoc() fallback:如果 subscribeToCases() 有設定
-  // limit(),舊案件有機會唔在已載入嘅 reports 清單入面,直接搜尋
-  // 會失敗,令追蹤連結對舊案件完全冇反應。呢裡改為先喺已載入清單
-  // 搵,搵唔到先直接查詢 Firestore。如果你目前 caseService.ts
-  // 嘅 subscribeToCases() 仲未加 limit(),呢段 fallback 邏輯依然
-  // 安全冇害,只係大部分時間唔會被觸發。
+  // ⚠️ fallback：如果 subscribeToCases() 有設定 limit()，舊案件有機會唔在
+  // 已載入嘅 reports 清單入面，直接搜尋會失敗，令追蹤連結對舊案件完全冇反應。
+  //
+  // ⚠️ 已清理：唔再直接讀取 data.reporterName / reporterPhone / reporterEmail /
+  // createdByUid，因為呢四個欄位已經搬去 /case/{caseId}/private/contact，
+  // 主文件根本冇呢啲值（讀出嚟只會係 undefined）。呢裡統一先設為空值，
+  // 真實聯絡資料會由 CaseDetailModal 自己按 isAdmin 狀態做 lazy-load fetch，
+  // 避免同一份資料被重複讀取兩次。
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const caseId = params.get('caseId');
@@ -94,10 +97,10 @@ function AppContent() {
             storagePath: data.storagePath || '',
             location: data.location || { lat: 22.3193, lng: 114.1694, address: '未提供地址' },
             description: data.description || '',
-            reporterName: data.reporterName || '熱心市民',
-            reporterPhone: data.reporterPhone || '',
-            reporterEmail: data.reporterEmail || '',
-            createdByUid: data.createdByUid,
+            reporterName: '',
+            reporterPhone: '',
+            reporterEmail: '',
+            createdByUid: undefined,
             createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : data.createdAt || new Date().toISOString(),
             status: data.status || 'pending',
             urgency: data.urgency || 'P1',
@@ -115,15 +118,7 @@ function AppContent() {
 
   const urgentCount = reports.filter((r) => r.urgency === 'P0' && r.status !== 'rescued' && r.status !== 'closed').length;
 
-  /**
-   * ⚠️ 本輪修復:原本呢裡漏咗真正發送確認信嘅 fetch 呼叫,只係
-   * 直接顯示 banner 話「已同步寄發確認信」,但實際上伺服器連請求
-   * 都未收到過。呢個係同案件創建「假成功」完全同類型嘅問題,只不過
-   * 發生喺確認信呢一步。現在改為先真正呼叫 API,伺服器回應成功
-   * 先顯示 banner;失敗只會 console.warn,唔會阻礙案件本身已經
-   * 成功建立嘅事實(確認信屬於次要功能,唔應該影響核心報案流程)。
-   */
-  const handleCreateReport = async (newReport: StrayReport) => {
+  const handleCreateReport = async (newReport: StrayReport): Promise<boolean> => {
     setSubmitErrorBanner(null);
 
     try {
@@ -159,11 +154,14 @@ function AppContent() {
           console.warn('Confirmation email request failed:', emailError);
         }
       }
+
+      return true;
     } catch (e) {
       console.error('Failed to create case in Firestore:', e);
       setSubmitErrorBanner(
         '通報提交失敗，個案尚未成功儲存。請檢查網絡連線後重試；如情況危急，請直接致電 SPCA 24 小時熱線 2711 1000。'
       );
+      return false;
     }
   };
 
@@ -237,6 +235,23 @@ function AppContent() {
     const targetReport = selectedReportForModal || justSubmittedReport;
     if (!targetReport) return;
 
+    // ⚠️ 核心修正：審核舊案件時（selectedReportForModal 嚟自 subscribeToCases()），
+    // reporterName / reporterPhone 已經喺私隱分層後被強制清空為空字串。
+    // 若唔補救，寄去 /api/ngo/notify 嘅通知會帶住空白電話，令 NGO 完全
+    // 攞唔到報案人嘅真正聯絡方法。因此如果偵測到電話為空且目前使用者係
+    // admin，先向 /case/{caseId}/private/contact 補抓真實資料。
+    // （justSubmittedReport 路徑本身已經帶住真實電話，呢個 fetch 唔會觸發。）
+    let reporterName = targetReport.reporterName;
+    let reporterPhone = targetReport.reporterPhone;
+
+    if (isAdmin && !reporterPhone) {
+      const contact = await fetchCaseContact(targetReport.id);
+      if (contact) {
+        reporterName = contact.reporterName || reporterName;
+        reporterPhone = contact.reporterPhone || reporterPhone;
+      }
+    }
+
     try {
       const res = await fetch('/api/ngo/notify', {
         method: 'POST',
@@ -245,8 +260,8 @@ function AppContent() {
           reportId: targetReport.id,
           ngoId,
           ngoName,
-          reporterName: targetReport.reporterName,
-          reporterPhone: targetReport.reporterPhone,
+          reporterName,
+          reporterPhone,
           urgency: targetReport.urgency,
           location: targetReport.location,
         }),
@@ -266,25 +281,25 @@ function AppContent() {
         simulated: !!receipt.simulated,
       };
 
-      setReports((prev) =>
-        prev.map((r) =>
-          r.id === targetReport.id
-            ? { ...r, status: 'in_progress', dispatchedToNGO: dispatchPayload }
-            : r
-        )
-      );
-      if (selectedReportForModal?.id === targetReport.id) {
-        setSelectedReportForModal((prev) =>
-          prev ? { ...prev, status: 'in_progress', dispatchedToNGO: dispatchPayload } : null
-        );
-      }
-      if (justSubmittedReport?.id === targetReport.id) {
-        setJustSubmittedReport((prev) =>
-          prev ? { ...prev, status: 'in_progress', dispatchedToNGO: dispatchPayload } : null
-        );
-      }
-
       if (isAdmin) {
+        setReports((prev) =>
+          prev.map((r) =>
+            r.id === targetReport.id
+              ? { ...r, status: 'in_progress', dispatchedToNGO: dispatchPayload }
+              : r
+          )
+        );
+        if (selectedReportForModal?.id === targetReport.id) {
+          setSelectedReportForModal((prev) =>
+            prev ? { ...prev, status: 'in_progress', dispatchedToNGO: dispatchPayload } : null
+          );
+        }
+        if (justSubmittedReport?.id === targetReport.id) {
+          setJustSubmittedReport((prev) =>
+            prev ? { ...prev, status: 'in_progress', dispatchedToNGO: dispatchPayload } : null
+          );
+        }
+
         try {
           await updateCaseStatusInFirestore(targetReport.id, 'in_progress', dispatchPayload);
         } catch (persistErr) {

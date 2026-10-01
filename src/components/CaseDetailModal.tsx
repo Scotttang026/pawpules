@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StrayReport, CaseStatus } from '../types';
 import { AIAnalysisCard } from './AIAnalysisCard';
 import { NGOMatchFeedback } from './NGOMatchFeedback';
 import { getGoogleMapsDirectionsUrl } from '../utils/location';
 import { useAuth } from '../contexts/AuthContext';
+import { fetchCaseContact, ReporterContactInfo } from '../services/caseService';
 import {
   X,
   MapPin,
@@ -22,28 +23,9 @@ import {
 interface CaseDetailModalProps {
   report: StrayReport;
   onClose: () => void;
-  // ⚠️ 已改為 optional：非管理員身份時，App.tsx 會傳入 undefined，
-  // 呢裡必須配合改為可選型別，否則 TypeScript 編譯會直接報錯。
   onUpdateStatus?: (reportId: string, newStatus: CaseStatus) => void;
   onDispatchToNGO: (ngoId: string, ngoName: string) => Promise<void>;
   onDeleteCase?: (reportId: string) => void;
-}
-
-// 將電話號碼遮蔽為 "9XXX XXXX" 形式，只保留首位數字辨識，
-// 避免非管理員讀取完整聯絡方式。
-function maskPhone(phone: string): string {
-  if (!phone || phone === '未填寫' || phone === '未提供 (匿名)') return phone;
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length < 4) return '****';
-  return `${digits.slice(0, 1)}${'X'.repeat(Math.max(0, digits.length - 4))}${digits.slice(-3)}`;
-}
-
-// 將 email 遮蔽為 "ab***@domain.com" 形式
-function maskEmail(email: string): string {
-  const [local, domain] = email.split('@');
-  if (!domain) return '***';
-  const visible = local.slice(0, 2);
-  return `${visible}${'*'.repeat(Math.max(1, local.length - 2))}@${domain}`;
 }
 
 export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
@@ -56,6 +38,35 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
   const { isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<'ai' | 'ngos'>('ai');
   const [copiedLink, setCopiedLink] = useState(false);
+
+  const [contactInfo, setContactInfo] = useState<ReporterContactInfo | null>(null);
+  const [loadingContact, setLoadingContact] = useState(false);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setContactInfo(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingContact(true);
+    fetchCaseContact(report.id)
+      .then((data) => {
+        if (!cancelled) setContactInfo(data);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingContact(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, report.id]);
+
+  const enrichedReport: StrayReport = {
+    ...report,
+    reporterName: contactInfo?.reporterName || report.reporterName,
+    reporterPhone: contactInfo?.reporterPhone || report.reporterPhone,
+    reporterEmail: contactInfo?.reporterEmail || report.reporterEmail,
+  };
 
   const statusOptions: { status: CaseStatus; label: string; color: string }[] = [
     { status: 'pending', label: '待處理', color: 'bg-stone-100 text-stone-700' },
@@ -84,7 +95,6 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto" id="case-detail-modal">
       <div className="relative w-full max-w-4xl bg-white rounded-3xl shadow-2xl border border-stone-200 overflow-hidden my-auto max-h-[92vh] flex flex-col">
-        {/* Header */}
         <div className="flex items-center justify-between p-4 sm:p-5 border-b border-stone-200 bg-stone-50">
           <div className="flex items-center gap-2.5 truncate">
             <span
@@ -140,9 +150,7 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Scrollable Content */}
         <div className="p-5 sm:p-6 overflow-y-auto space-y-6 flex-1">
-          {/* Top Overview: Photo + Case Meta */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
             <div className="md:col-span-5">
               <div className="aspect-4/3 rounded-2xl overflow-hidden bg-stone-100 border border-stone-200 shadow-xs">
@@ -170,48 +178,37 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                   </div>
                 </div>
 
-                {/*
-                  ⚠️ 私隱保護：由於 firestore.rules 設定案件為公開可讀
-                  （allow read: if true），任何人都可以打開此對話框，
-                  所以報案人嘅電話同 email 只向管理員顯示完整內容，
-                  非管理員只會見到遮蔽版本。長遠建議將呢部分資料改為
-                  儲存喺獨立 subcollection 並收緊讀取權限，而唔淨係
-                  靠前端遮蔽（前端遮蔽只能夠阻止一般使用者透過畫面
-                  直接睇到，唔能夠阻止有心人直接查詢 Firestore API）。
-                */}
                 <div className="flex items-center gap-4 flex-wrap pt-2 border-t border-stone-200/60 text-2xs">
-                  <div className="flex items-center gap-1.5 text-stone-600">
-                    <User className="w-3.5 h-3.5 text-stone-400" />
-                    <span>通報人：<strong>{report.reporterName}</strong></span>
-                  </div>
-
-                  {report.reporterPhone && report.reporterPhone !== '未填寫' && (
-                    <div className="flex items-center gap-1.5 text-stone-600">
-                      <Phone className="w-3.5 h-3.5 text-stone-400" />
-                      {isAdmin ? (
-                        <a href={`tel:${report.reporterPhone}`} className="text-blue-600 font-bold hover:underline">
-                          {report.reporterPhone}
-                        </a>
-                      ) : (
-                        <span className="flex items-center gap-1 text-stone-400" title="僅管理員可查看完整聯絡方式">
-                          <Lock className="w-3 h-3" />
-                          {maskPhone(report.reporterPhone)}
+                  {isAdmin ? (
+                    <>
+                      <div className="flex items-center gap-1.5 text-stone-600">
+                        <User className="w-3.5 h-3.5 text-stone-400" />
+                        <span>
+                          通報人：
+                          <strong>{loadingContact ? '載入中...' : (contactInfo?.reporterName || '熱心市民')}</strong>
                         </span>
-                      )}
-                    </div>
-                  )}
+                      </div>
 
-                  {report.reporterEmail && (
-                    <div className="flex items-center gap-1.5 text-stone-600">
-                      <Mail className="w-3.5 h-3.5 text-stone-400" />
-                      {isAdmin ? (
-                        <span className="text-stone-700">{report.reporterEmail}</span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-stone-400" title="僅管理員可查看完整聯絡方式">
-                          <Lock className="w-3 h-3" />
-                          {maskEmail(report.reporterEmail)}
-                        </span>
+                      {contactInfo?.reporterPhone && contactInfo.reporterPhone !== '未填寫' && contactInfo.reporterPhone !== '未提供 (匿名)' && (
+                        <div className="flex items-center gap-1.5 text-stone-600">
+                          <Phone className="w-3.5 h-3.5 text-stone-400" />
+                          <a href={`tel:${contactInfo.reporterPhone}`} className="text-blue-600 font-bold hover:underline">
+                            {contactInfo.reporterPhone}
+                          </a>
+                        </div>
                       )}
+
+                      {contactInfo?.reporterEmail && (
+                        <div className="flex items-center gap-1.5 text-stone-600">
+                          <Mail className="w-3.5 h-3.5 text-stone-400" />
+                          <span className="text-stone-700">{contactInfo.reporterEmail}</span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-stone-400" title="報案人聯絡資料已受保護，僅供管理員查看">
+                      <Lock className="w-3 h-3" />
+                      <span>通報人聯絡資料已受保護（僅供救援協調團隊查看）</span>
                     </div>
                   )}
 
@@ -229,7 +226,6 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                 </div>
               </div>
 
-              {/* Status Updater — 只有管理員先可以互動變更，其他人只見唯讀狀態 */}
               <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-200">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
@@ -270,7 +266,6 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
             </div>
           </div>
 
-          {/* Sub-tab Navigation */}
           <div className="flex items-center gap-2 border-b border-stone-200">
             <button
               onClick={() => setActiveTab('ai')}
@@ -294,7 +289,6 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
             </button>
           </div>
 
-          {/* Tab Content */}
           {activeTab === 'ai' && (
             <div>
               {report.aiAnalysis ? (
@@ -311,7 +305,7 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
           {activeTab === 'ngos' && (
             <div>
               <NGOMatchFeedback
-                report={report}
+                report={enrichedReport}
                 matchedNGOs={report.matchedNGOs || []}
                 onDispatchToNGO={onDispatchToNGO}
               />
@@ -319,7 +313,6 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
           )}
         </div>
 
-        {/* Modal Footer */}
         <div className="p-4 bg-stone-50 border-t border-stone-200 flex items-center justify-between">
           <a
             href={getGoogleMapsDirectionsUrl(report.location.lat, report.location.lng)}
