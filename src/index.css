@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+@theme {
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: 0.875rem;
+  --text-3xs: 0.5625rem;
+  --text-3xs--line-height: 0.75rem;
+}
+
 body {
   background-color: rgba(255, 247, 237, 0.8);
 }

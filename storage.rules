@@ -1,0 +1,20 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /animal-reports/{fileName} {
+      // getDownloadURL() 需要 get 權限；list 禁止，防止有人列出全部相片
+      allow get: if true;
+      allow list: if false;
+
+      // 只准新建，唔准覆蓋或刪除；前端已統一轉成 JPEG
+      allow create: if request.resource.size > 0
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType == 'image/jpeg'
+        && fileName.matches('^[A-Za-z0-9_-]{1,100}\\.jpg$');
+      allow update, delete: if false;
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

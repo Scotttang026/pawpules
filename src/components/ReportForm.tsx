@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AnimalType, LocationCoords, StrayReport, NGOOrganization } from '../types';
-import { PRESET_LOCATIONS, geocodeAddressQuery } from '../utils/location';
+import { PRESET_LOCATIONS, geocodeAddressQuery, reverseGeocodeCoords } from '../utils/location';
+import AddressAutocomplete from './AddressAutocomplete';
+import type { ResolvedAddress } from '../services/places';
 import { compressImage, uploadAnimalPhoto } from '../utils/imageCompressor';
 import { rankFirestoreNGOs } from '../services/caseService';
 import { useAuth } from '../contexts/AuthContext';
@@ -29,7 +31,8 @@ interface ReportFormProps {
   onSubmitReport: (newReport: StrayReport) => Promise<boolean>;
   onAnalysisStart?: () => void;
 }
-
+// 網頁版留空 = 同網域；將來手機 app 會填 Cloud Run 網址
+const API_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '').replace(/\/$/, '');
 export const ReportForm: React.FC<ReportFormProps> = ({
   ngos,
   onSubmitReport,
@@ -128,7 +131,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     }
   };
 
-  const handleGetCurrentLocation = () => {
+    const handleGetCurrentLocation = () => {
     if (!navigator.geolocation) {
       alert('您的裝置或瀏覽器不支援地理定位');
       return;
@@ -141,35 +144,24 @@ export const ReportForm: React.FC<ReportFormProps> = ({
       async (pos) => {
         const { latitude, longitude } = pos.coords;
         try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
-          );
-          let address = `經緯度座標 (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
-          let district = '香港';
-          if (res.ok) {
-            const data = await res.json();
-            address = data.display_name?.split(',').slice(0, 3).join(', ') || address;
-            district = data.address?.suburb || data.address?.district || district;
-          }
-          setLocation({ lat: latitude, lng: longitude, address, district });
+          // 經伺服器 /api/reverse-geocode（Google 優先，fallback Nominatim），呢個 function 唔會 throw
+          const { address, district } = await reverseGeocodeCoords(latitude, longitude);
+          setLocation({ lat: latitude, lng: longitude, address, district: district || '現場位置' });
           setManualAddressInput(address);
           setStatusMessage('✓ GPS 定位成功');
-        } catch {
-          setLocation({
-            lat: latitude,
-            lng: longitude,
-            address: `GPS 座標 (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
-            district: '現場位置',
-          });
-          setStatusMessage('✓ 已取得經緯度');
+        } finally {
+          setIsGeolocating(false);
         }
-        setIsGeolocating(false);
       },
-      () => {
+      (err) => {
         setIsGeolocating(false);
-        setStatusMessage('GPS 定位失敗或被拒絕，請手動輸入地址');
+        setStatusMessage(
+          err.code === err.PERMISSION_DENIED
+            ? '你未允許定位權限，請手動輸入地址'
+            : 'GPS 定位失敗，請手動輸入地址'
+        );
       },
-      { enableHighAccuracy: true, timeout: 8000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
   };
 
@@ -199,6 +191,14 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     }
     setIsSearchingAddress(false);
   };
+    
+  // 市民喺自動完成清單揀咗地址
+  const handleSelectPlace = (p: ResolvedAddress) => {
+    setLocation({ lat: p.lat, lng: p.lng, address: p.address, district: '定位搜尋點' });
+    setManualAddressInput(p.address);
+    setStatusMessage('✓ 已找到地址位置');
+  };
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -263,7 +263,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
       setStatusMessage('🔍 Gemini AI 正在評估外傷、呼吸起伏與骨折跡象...');
       let aiResult = null;
       try {
-        const aiResponse = await fetch('/api/ai/analyze-stray', {
+        const aiResponse = await fetch(`${API_BASE}/api/ai/analyze-stray`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -324,31 +324,10 @@ export const ReportForm: React.FC<ReportFormProps> = ({
       setStatusMessage('☁️ 正在儲存案件記錄...');
       const saveSuccess = await onSubmitReport(newReport);
 
+      // 確認信統一由 App.tsx 的 handleCreateReport 發送（寫入成功後先寄），呢度唔再重複寄
       if (!saveSuccess) {
-        // 上層（App.tsx）會顯示失敗提示 banner，呢裡只需要還原
-        // 本地提交狀態，讓市民可以在同一份已填寫內容上重試。
         setSubmitError('案件儲存失敗，請稍後再試一次。');
         return;
-      }
-
-      if (effectiveReporterEmail) {
-        try {
-          setStatusMessage('📧 正在發送案件立案確認信與追蹤連結至您的電子信箱...');
-          await fetch('/api/cases/send-confirmation-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              caseId: reportId,
-              reporterEmail: effectiveReporterEmail,
-              reporterName: effectiveReporterName,
-              animalType,
-              urgency,
-              location,
-            }),
-          });
-        } catch (emailErr) {
-          console.warn('Confirmation email dispatch warning:', emailErr);
-        }
       }
     } catch (err: any) {
       console.error('Submit report error:', err);
@@ -477,7 +456,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                accept="image/jpeg,image/png,image/webp"
+                accept="image/*,.heic,.heif"
                 className="hidden"
                 id="file-upload-input"
               />
@@ -529,17 +508,15 @@ export const ReportForm: React.FC<ReportFormProps> = ({
               取得 GPS 定位
             </button>
           </div>
-
           <div className="flex gap-2">
-            <div className="relative flex-1">
-              <MapPin className="w-4 h-4 text-rose-500 absolute left-3 top-3" />
-              <input
-                type="text"
+                        <div className="flex-1">
+              <AddressAutocomplete
                 value={manualAddressInput}
-                onChange={(e) => setManualAddressInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleSearchManualAddress())}
-                placeholder="輸入精確地址或地標，例如：旺角水渠道東成大廈後巷、沙田城門河畔單車徑"
-                className="w-full pl-9 pr-3 py-2.5 text-xs bg-white border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                onChange={setManualAddressInput}
+                onSelect={handleSelectPlace}
+                onEnter={handleSearchManualAddress}
+                bias={{ lat: location.lat, lng: location.lng }}
+                placeholder="輸入地址或地標，例如：旺角朗豪坊、沙田城門河畔單車徑"
               />
             </div>
             <button

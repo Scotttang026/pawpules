@@ -1,10 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import {
-  getFirestore,
-  doc,
-  getDocFromServer,
-} from 'firebase/firestore';
+import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -18,7 +14,12 @@ if (!firebaseConfig.firestoreDatabaseId) {
     'firebase.ts: firestoreDatabaseId 未設定，可能會連接到錯誤的 Firestore database。'
   );
 }
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// ignoreUndefinedProperties：自動略過值為 undefined 嘅欄位，唔會令整個寫入失敗
+export const db = initializeFirestore(
+  app,
+  { ignoreUndefinedProperties: true },
+  firebaseConfig.firestoreDatabaseId
+);
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();

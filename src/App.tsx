@@ -62,30 +62,20 @@ function AppContent() {
     };
   }, []);
 
-  // ⚠️ fallback：如果 subscribeToCases() 有設定 limit()，舊案件有機會唔在
-  // 已載入嘅 reports 清單入面，直接搜尋會失敗，令追蹤連結對舊案件完全冇反應。
-  //
-  // ⚠️ 已清理：唔再直接讀取 data.reporterName / reporterPhone / reporterEmail /
-  // createdByUid，因為呢四個欄位已經搬去 /case/{caseId}/private/contact，
-  // 主文件根本冇呢啲值（讀出嚟只會係 undefined）。呢裡統一先設為空值，
-  // 真實聯絡資料會由 CaseDetailModal 自己按 isAdmin 狀態做 lazy-load fetch，
-  // 避免同一份資料被重複讀取兩次。
+  // 追蹤連結：只喺頁面載入時處理一次，開完 modal 即刻清走網址上的 ?caseId=，
+  // 避免之後每次 Firestore 同步都將已關閉的 modal 重新彈出。
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const caseId = params.get('caseId');
     if (!caseId) return;
 
-    const matchInLoaded = reports.find((r) => r.id === caseId);
-    if (matchInLoaded) {
-      setSelectedReportForModal(matchInLoaded);
-      return;
-    }
-
-    if (reports.length === 0) return; // 等待首次同步完成先嘗試 fallback
+    let cancelled = false;
 
     (async () => {
       try {
         const snap = await getDoc(doc(db, CASE_COLLECTION, caseId));
+        if (cancelled) return;
+
         if (snap.exists()) {
           const data = snap.data() as any;
           setSelectedReportForModal({
@@ -109,12 +99,29 @@ function AppContent() {
             matchedNGOs: data.matchedNGOs,
             dispatchedToNGO: data.dispatchedToNGO,
           });
+        } else {
+          alert(`找不到案件 #${caseId}，可能已被刪除或連結有誤。`);
         }
       } catch (err) {
         console.warn('Direct case lookup by tracking link failed:', err);
+      } finally {
+        if (!cancelled) {
+          params.delete('caseId');
+          const qs = params.toString();
+          window.history.replaceState(
+            null,
+            '',
+            window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash
+          );
+        }
       }
     })();
-  }, [reports]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
 
   const urgentCount = reports.filter((r) => r.urgency === 'P0' && r.status !== 'rescued' && r.status !== 'closed').length;
 

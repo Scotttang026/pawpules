@@ -5,13 +5,38 @@ import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import { AIAnalysisResult } from "./src/types";
 
-dotenv.config();
+// 先讀 .env.local（本機開發），再讀 .env；同一個 key 以先讀到嘅為準
+dotenv.config({ path: ['.env.local', '.env'], quiet: true });
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 // 如實際部署喺反向代理（Nginx、Cloud Run、Render 等）後面，設定信任第一層 proxy
 app.set("trust proxy", 1);
+
+// ===== CORS：容許將來 iOS / Android app（Capacitor）呼叫 API =====
+// 網頁版係同一個網域，唔受影響；呢段只係多准兩個手機 app 嘅來源
+const ALLOWED_ORIGINS = new Set([
+  "capacitor://localhost", // iOS app
+  "https://localhost",     // Android app
+  ...(process.env.EXTRA_CORS_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean),
+]);
+app.use("/api", (req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Max-Age", "86400");
+  }
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 
 // ✅ [修正 Bug C] 補回缺失的 Nominatim User-Agent 常數宣告
 const NOMINATIM_USER_AGENT = "PawPulse-RescuePlatform/1.0 (contact@pawpulse.app)";
@@ -234,6 +259,140 @@ app.get("/api/reverse-geocode", geocodeRateLimitMiddleware, async (req: Request,
 
   res.status(404).json({ error: "找不到對應地址" });
 });
+
+// ---------- 地址自動完成（Google Places API New）----------
+
+// 優先用專用 key；冇就用返現有嘅 GOOGLE_MAPS_API_KEY
+function getPlacesApiKey(): string | undefined {
+  return process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+}
+
+const placesRateLimitMiddleware = async (req: Request, res: Response, next: NextFunction) => {
+  const { allowed, remaining } = await rateLimiter.isAllowed(`places_${getClientIp(req)}`, 60, 60);
+  res.setHeader("X-RateLimit-Remaining", remaining);
+  if (!allowed) {
+    res.status(429).json({ error: "搜尋太頻密，請稍後再試。" });
+    return;
+  }
+  next();
+};
+
+const PLACES_SESSION_RE = /^[A-Za-z0-9_-]{8,64}$/;
+const PLACE_ID_RE = /^[A-Za-z0-9_-]{10,300}$/;
+
+app.post("/api/places/autocomplete", placesRateLimitMiddleware, async (req: Request, res: Response) => {
+  const apiKey = getPlacesApiKey();
+  if (!apiKey) {
+    res.status(503).json({ error: "地址搜尋服務未設定" });
+    return;
+  }
+
+  const input = typeof req.body?.input === "string" ? req.body.input.trim().slice(0, 100) : "";
+  if (input.length < 2) {
+    res.json({ suggestions: [] });
+    return;
+  }
+
+  const rawToken = req.body?.sessionToken;
+  const sessionToken = typeof rawToken === "string" && PLACES_SESSION_RE.test(rawToken) ? rawToken : undefined;
+
+  const body: Record<string, unknown> = {
+    input,
+    languageCode: "zh-HK",
+    includedRegionCodes: ["hk"],
+    ...(sessionToken && { sessionToken }),
+  };
+  const lat = Number(req.body?.lat);
+  const lng = Number(req.body?.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+    body.locationBias = { circle: { center: { latitude: lat, longitude: lng }, radius: 5000 } };
+  }
+
+  try {
+    const r = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask":
+          "suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) {
+      console.error("[Places] autocomplete HTTP", r.status, await r.text().catch(() => ""));
+      res.status(502).json({ error: "地址搜尋暫時無法使用" });
+      return;
+    }
+    const data: any = await r.json();
+    const suggestions = (data.suggestions ?? [])
+      .map((s: any) => s.placePrediction)
+      .filter((p: any) => p?.placeId)
+      .slice(0, 5)
+      .map((p: any) => ({
+        placeId: String(p.placeId),
+        mainText: String(p.structuredFormat?.mainText?.text ?? p.text?.text ?? ""),
+        secondaryText: String(p.structuredFormat?.secondaryText?.text ?? ""),
+      }));
+    res.json({ suggestions });
+  } catch (err) {
+    console.error("[Places] autocomplete failed:", (err as Error).message);
+    res.status(502).json({ error: "地址搜尋暫時無法使用" });
+  }
+});
+
+app.get("/api/places/details/:placeId", placesRateLimitMiddleware, async (req: Request, res: Response) => {
+  const apiKey = getPlacesApiKey();
+  if (!apiKey) {
+    res.status(503).json({ error: "地址搜尋服務未設定" });
+    return;
+  }
+
+  const { placeId } = req.params;
+  if (!PLACE_ID_RE.test(placeId)) {
+    res.status(400).json({ error: "無效地點" });
+    return;
+  }
+
+  const url = new URL(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`);
+  url.searchParams.set("languageCode", "zh-HK");
+  const token = req.query.sessionToken;
+  if (typeof token === "string" && PLACES_SESSION_RE.test(token)) url.searchParams.set("sessionToken", token);
+
+  try {
+    const r = await fetch(url, {
+      headers: {
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": "id,formattedAddress,location,displayName",
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) {
+      console.error("[Places] details HTTP", r.status, await r.text().catch(() => ""));
+      res.status(502).json({ error: "未能取得地點資料" });
+      return;
+    }
+    const d: any = await r.json();
+    const lat = d.location?.latitude;
+    const lng = d.location?.longitude;
+    if (typeof lat !== "number" || typeof lng !== "number") {
+      res.status(502).json({ error: "此地點冇座標資料" });
+      return;
+    }
+    res.json({
+      placeId: d.id ?? placeId,
+      address: String(d.formattedAddress ?? ""),
+      name: String(d.displayName?.text ?? ""),
+      lat,
+      lng,
+    });
+  } catch (err) {
+    console.error("[Places] details failed:", (err as Error).message);
+    res.status(502).json({ error: "未能取得地點資料" });
+  }
+});
+
 
 // 驗證真正檔案內容（magic bytes），唔淨係信任副檔名／宣稱嘅 MIME type
 function detectImageType(buffer: Buffer): "jpg" | "png" | "webp" | null {

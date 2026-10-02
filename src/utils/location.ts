@@ -17,6 +17,9 @@ export const PRESET_LOCATIONS: PresetLocation[] = [
   { name: '西貢 (西貢碼頭海傍)', district: '西貢區', lat: 22.3814, lng: 114.2744, sampleAddress: '新界西貢惠民路西貢海濱長廊邊' },
 ];
 
+// 網頁版留空 = 同網域；將來手機 app 會填 Cloud Run 網址
+const API_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '').replace(/\/$/, '');
+
 function isValidCoordinate(lat: number, lng: number): boolean {
   return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }
@@ -50,10 +53,7 @@ export function getGoogleMapsDirectionsUrl(destLat: number, destLng: number, ori
 }
 
 /**
- * ⚠️ 已改為呼叫伺服器端 /api/reverse-geocode，唔再由瀏覽器直接呼叫
- * Nominatim。伺服器會優先使用 Google Maps Geocoding API（如已設定
- * GOOGLE_MAPS_API_KEY），並自動 fallback 至 Nominatim，同時解決咗
- * 瀏覽器端無法設定 User-Agent 嘅限制。
+ * 呼叫伺服器端 /api/reverse-geocode（Google 優先，fallback Nominatim）。
  */
 export async function reverseGeocodeCoords(lat: number, lng: number): Promise<{ address: string; district?: string }> {
   if (!isValidCoordinate(lat, lng)) {
@@ -61,11 +61,7 @@ export async function reverseGeocodeCoords(lat: number, lng: number): Promise<{ 
   }
 
   try {
-    const res = await fetchWithTimeout(
-      `/api/reverse-geocode?lat=${lat}&lng=${lng}`,
-      {},
-      8000
-    );
+    const res = await fetchWithTimeout(`${API_BASE}/api/reverse-geocode?lat=${lat}&lng=${lng}`, {}, 8000);
     if (res.ok) {
       const data = await res.json();
       if (data && typeof data.address === 'string') {
@@ -83,22 +79,18 @@ export async function reverseGeocodeCoords(lat: number, lng: number): Promise<{ 
 }
 
 /**
- * ⚠️ 已改為呼叫伺服器端 /api/geocode。
+ * 呼叫伺服器端 /api/geocode。
  */
 export async function geocodeAddressQuery(query: string): Promise<{ lat: number; lng: number; address: string } | null> {
   const cleanQuery = query.trim();
   if (!cleanQuery) return null;
 
   try {
-    const res = await fetchWithTimeout(
-      `/api/geocode?address=${encodeURIComponent(cleanQuery)}`,
-      {},
-      8000
-    );
+    const res = await fetchWithTimeout(`${API_BASE}/api/geocode?address=${encodeURIComponent(cleanQuery)}`, {}, 8000);
     if (res.ok) {
       const data = await res.json();
       if (data && isValidCoordinate(data.lat, data.lng)) {
-        return { lat: data.lat, lng: data.lng, address: data.address };
+        return { lat: data.lat, lng: data.lng, address: data.formattedAddress || data.address || cleanQuery };
       }
     }
   } catch (err) {
