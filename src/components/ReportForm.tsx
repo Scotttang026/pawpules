@@ -22,17 +22,16 @@ import {
   FileText,
   AlertCircle,
 } from 'lucide-react';
+import { getEmergencyContact } from '../config/emergency';
 
 interface ReportFormProps {
   ngos: NGOOrganization[];
-  // ⚠️ 已改為回傳 Promise<boolean>：true 代表 Firestore 寫入成功，
-  // 令本表單可以確認案件已真正儲存之後先發送確認信，
-  // 避免市民收到「已立案」通知但實際上案件從未成功寫入資料庫。
+  // 回傳 Promise<boolean>：true 代表 Firestore 寫入成功
+  // AI 分析同確認信統一由 App.tsx 喺寫入成功後呼叫 server 執行
   onSubmitReport: (newReport: StrayReport) => Promise<boolean>;
   onAnalysisStart?: () => void;
 }
-// 網頁版留空 = 同網域；將來手機 app 會填 Cloud Run 網址
-const API_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '').replace(/\/$/, '');
+
 export const ReportForm: React.FC<ReportFormProps> = ({
   ngos,
   onSubmitReport,
@@ -47,32 +46,20 @@ export const ReportForm: React.FC<ReportFormProps> = ({
 
   // Reporter details & Anti-abuse
   const [isAnonymous, setIsAnonymous] = useState(false);
-  const [reporterName, setReporterName] = useState(user?.displayName || '熱心市民');
+  const [reporterName, setReporterName] = useState(user?.displayName || '');
   const [reporterPhone, setReporterPhone] = useState('');
-  // ⚠️ 已修正：預設值改為空字串，之前錯誤預設咗管理員個人 email，
-  // 會導致市民漏填時案件確認信被寄去管理員信箱而唔係報案人信箱。
   const [reporterEmail, setReporterEmail] = useState(user?.email || '');
 
-  // Anti-abuse Captcha
+  // Anti-abuse Captcha（只擋最基本嘅機械人，真正防濫用要靠 App Check / reCAPTCHA）
   const [captchaCode, setCaptchaCode] = useState('');
   const [userCaptchaInput, setUserCaptchaInput] = useState('');
-  // ⚠️ 已修正：私隱同意勾選框預設改為 false，要求用戶主動勾選同意。
-  // 預設已勾選嘅同意方式（pre-ticked consent）在多數私隱法規下
-  // 唔被視為有效同意，屬於常見嘅 dark pattern，必須改為主動 opt-in。
+  // 私隱同意必須由用戶主動勾選（唔可以預設已勾選）
   const [agreedPrivacy, setAgreedPrivacy] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  // Generate random 4-character anti-spam code
-  //
-  // ⚠️ 重要提醒：呢個驗證碼完全喺前端 JavaScript 生成同比對，
-  // 對於直接呼叫 API／Firestore 嘅自動化腳本完全冇任何實際阻擋力，
-  // 只能夠阻止最基本、冇特別針對性嘅表單填寫機械人。
-  // 如需要真正有效嘅防濫用機制，建議串接 Google reCAPTCHA v3
-  // 或 Firebase App Check（你嘅 firebase-applet-config.json 已有
-  // 預留 recaptchaSiteKey 欄位但目前為空，可考慮填入並整合）。
   const refreshCaptcha = () => {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     let code = '';
@@ -97,10 +84,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     }
   }, [user]);
 
-  // Location state
-  // ⚠️ 注意：此處預設值為第一個預設地點，如果市民忘記確認／更新
-  // 位置就直接送出，案件會攜帶錯誤位置。由於本平台處理 P0 緊急
-  // 案件，建議日後可以考慮加入「請確認地址正確」嘅二次確認提示。
+  // Location state（預設值只係佔位，市民必須主動確認位置先可以送出）
   const [location, setLocation] = useState<LocationCoords>({
     lat: PRESET_LOCATIONS[0].lat,
     lng: PRESET_LOCATIONS[0].lng,
@@ -110,7 +94,6 @@ export const ReportForm: React.FC<ReportFormProps> = ({
   const [manualAddressInput, setManualAddressInput] = useState('');
   const [isGeolocating, setIsGeolocating] = useState(false);
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
-  // 市民必須主動確認位置（GPS／揀建議地址／定位成功）先可以送出，避免用咗預設座標
   const [locationConfirmed, setLocationConfirmed] = useState(false);
 
   const [statusMessage, setStatusMessage] = useState('');
@@ -133,7 +116,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     }
   };
 
-    const handleGetCurrentLocation = () => {
+  const handleGetCurrentLocation = () => {
     if (!navigator.geolocation) {
       alert('您的裝置或瀏覽器不支援地理定位');
       return;
@@ -151,6 +134,9 @@ export const ReportForm: React.FC<ReportFormProps> = ({
           setManualAddressInput(address);
           setLocationConfirmed(true);
           setStatusMessage('✓ GPS 定位成功');
+        } catch (err) {
+          console.warn('Reverse geocode failed:', err);
+          setStatusMessage('已取得 GPS 座標，但未能轉換成地址，請手動輸入地址');
         } finally {
           setIsGeolocating(false);
         }
@@ -167,7 +153,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     );
   };
 
-    const handleSearchManualAddress = async () => {
+  const handleSearchManualAddress = async () => {
     const query = manualAddressInput.trim();
     if (!query) return;
 
@@ -187,11 +173,14 @@ export const ReportForm: React.FC<ReportFormProps> = ({
       } else {
         setStatusMessage('搵唔到呢個地址嘅位置，請喺建議清單揀一個地址，或者撳「取得 GPS 定位」。');
       }
+    } catch (err) {
+      console.warn('Geocode failed:', err);
+      setStatusMessage('地址搜尋暫時無法使用，請稍後再試，或者撳「取得 GPS 定位」。');
     } finally {
       setIsSearchingAddress(false);
     }
   };
-    
+
   // 市民喺自動完成清單揀咗地址
   const handleSelectPlace = (p: ResolvedAddress) => {
     setLocation({ lat: p.lat, lng: p.lng, address: p.address, district: p.district || '待確認地區' });
@@ -219,6 +208,12 @@ export const ReportForm: React.FC<ReportFormProps> = ({
       return;
     }
 
+    const phone = reporterPhone.trim();
+    if (!isAnonymous && phone && !/^\+?[0-9 ()-]{6,30}$/.test(phone)) {
+      alert('電話格式不正確，請只輸入數字，可以加國家區號，例如 +852 9123 4567');
+      return;
+    }
+
     if (userCaptchaInput.trim().toUpperCase() !== captchaCode.toUpperCase()) {
       alert('防濫用驗證碼不正確，請重新輸入以保障通報真實性。');
       refreshCaptcha();
@@ -231,12 +226,11 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     }
 
     setIsSubmitting(true);
-    setStatusMessage('🚀 正在由 Google Gemini 多模態 AI 分析傷病嚴重度...');
+    setStatusMessage('🚀 正在準備通報資料...');
     if (onAnalysisStart) onAnalysisStart();
 
     try {
-      // ⚠️ Case ID 已加入隨機尾碼，降低同一毫秒內多筆提交產生 ID
-      // 碰撞（collision）嘅風險，避免罕見情況下覆蓋另一宗案件。
+      // Case ID 加入隨機尾碼，避免同一毫秒內多筆提交撞 ID
       const reportId = `PW-${Date.now().toString(36).toUpperCase()}-${Math.random()
         .toString(36)
         .slice(2, 6)
@@ -252,58 +246,23 @@ export const ReportForm: React.FC<ReportFormProps> = ({
         finalStoragePath = uploadResult.storagePath;
       }
 
-      // ⚠️ 防禦性檢查：firestore.rules 限制 photoUrl 長度上限 2048 字元。
-      // 正常流程下 uploadAnimalPhoto 成功後 finalPhotoUrl 會係短小嘅
-      // Storage URL，但如果上傳步驟被跳過（例如冇 photoBlob），
-      // finalPhotoUrl 會回退去 photoPreview（可能係幾百 KB 嘅 base64
-      // dataURL），必定超過限制導致 Firestore 直接拒絕寫入。
-      // 提早喺前端偵測並友善提示，好過等到最後一步先收到含糊嘅
-      // permission-denied 錯誤。
+      // firestore.rules 限制 photoUrl 長度上限 2048；如果仲係 base64 dataURL 代表上傳未完成
       if (finalPhotoUrl.length > 2048) {
         throw new Error('照片連結過長，可能係上傳步驟未完成，請重新選擇照片再試一次。');
       }
 
-      const analysisBase64 = photoPreview;
-
-      setStatusMessage('🔍 Gemini AI 正在評估外傷、呼吸起伏與骨折跡象...');
-      let aiResult = null;
-      try {
-        const aiResponse = await fetch(`${API_BASE}/api/ai/analyze-stray`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            imageBase64: analysisBase64,
-            animalTypeHint: animalType,
-            description,
-          }),
-        });
-
-        if (aiResponse.ok) {
-          const data = await aiResponse.json();
-          if (data && !data.noResponse && data.urgencyLevel) {
-            aiResult = data;
-          } else {
-            aiResult = null;
-            console.info('Gemini API returned no response.');
-          }
-        }
-      } catch (aiErr) {
-        console.warn('AI analysis call failed or had no response:', aiErr);
-        aiResult = null;
-      }
-
-      const urgency = aiResult?.urgencyLevel || 'P1';
-
+      // AI 分析改由 server 喺案件建立後執行（見 App.tsx），前端唔可以自訂緊急度
+      const urgency = 'P1' as const;
       const matchedNGOs = rankFirestoreNGOs(ngos, location.lat, location.lng, animalType, urgency);
 
-      const effectiveReporterName = isAnonymous ? '匿名通報市民' : reporterName.trim() || '熱心市民';
-      const effectiveReporterPhone = isAnonymous ? '未提供 (匿名)' : reporterPhone.trim() || '未填寫';
+      const effectiveReporterName = isAnonymous ? '' : reporterName.trim();
+      const effectiveReporterPhone = isAnonymous ? '' : phone;
       const effectiveReporterEmail = reporterEmail.trim();
 
       const newReport: StrayReport = {
         id: reportId,
-        title: `${location.district || '市區'} - ${
-          animalType === 'cat' ? '流浪貓' : animalType === 'dog' ? '流浪狗' : '動物'
+        title: `${location.district || '待確認地區'} - ${
+          animalType === 'cat' ? '流浪貓' : animalType === 'dog' ? '流浪狗' : animalType === 'bird' ? '雀鳥' : '動物'
         }通報`,
         animalType,
         customAnimalName: customAnimalName.trim() || undefined,
@@ -318,18 +277,15 @@ export const ReportForm: React.FC<ReportFormProps> = ({
         createdAt: new Date().toISOString(),
         status: 'pending',
         urgency,
-        geminiResponse: aiResult,
-        aiAnalysis: aiResult,
+        geminiResponse: null,
+        aiAnalysis: null,
         matchedNGOs: matchedNGOs.slice(0, 3),
       };
 
-      // ⚠️ 已修正順序：先確認 Firestore 寫入成功，先發送確認信。
-      // 之前嘅版本喺呢一步之前就已經觸發咗確認信，若果案件最終
-      // 未能成功儲存，市民會收到一封指向唔存在案件嘅確認信。
-      setStatusMessage('☁️ 正在儲存案件記錄...');
+      // 先確認 Firestore 寫入成功；AI 分析同確認信由 App.tsx 喺成功後先觸發
+      setStatusMessage('☁️ 正在儲存案件，並由 Gemini AI 分析傷勢...');
       const saveSuccess = await onSubmitReport(newReport);
 
-      // 確認信統一由 App.tsx 的 handleCreateReport 發送（寫入成功後先寄），呢度唔再重複寄
       if (!saveSuccess) {
         setSubmitError('案件儲存失敗，請稍後再試一次。');
         return;
@@ -554,6 +510,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
             </div>
           )}
         </div>
+
         {/* Section 4: Notes and Reporter details */}
         <div className="rounded-2xl border-2 border-stone-200 bg-stone-50/60 p-4 sm:p-5 shadow-xs space-y-3.5">
           <div className="flex items-center justify-between border-b border-stone-200 pb-2.5">
@@ -623,7 +580,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                       type="tel"
                       value={reporterPhone}
                       onChange={(e) => setReporterPhone(e.target.value)}
-                      placeholder="9123 4567"
+                      placeholder="+852 9123 4567"
                       className="w-full p-2.5 text-xs bg-white border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
                     />
                   </div>
@@ -686,7 +643,8 @@ export const ReportForm: React.FC<ReportFormProps> = ({
               required
             />
             <label htmlFor="privacy-consent" className="text-2xs text-stone-600 leading-relaxed cursor-pointer">
-              本人同意依照香港《個人資料（私隱）條例》提供上述資料，並明瞭通報聯絡僅供救助隊緊急核實位置。同時理解{' '}
+              本人同意提供上述資料，並明瞭：動物相片、發現位置及狀況描述會<strong>公開顯示</strong>於地圖及個案列表；
+              稱呼、電話及電郵<strong>不會公開</strong>，只供管理員及受委託救援機構聯絡之用；相片及描述會交由 Google Gemini AI 作初步分析。同時理解{' '}
               <button
                 type="button"
                 onClick={() => setShowPrivacyModal(true)}
@@ -729,7 +687,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
           {isSubmitting ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin" />
-              <span>AI 多模態分析傷勢中，照片正上傳至 Cloud Storage...</span>
+              <span>正在上傳照片及儲存案件，AI 將自動分析傷勢...</span>
             </>
           ) : (
             <>
@@ -750,6 +708,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                 <h3 className="font-bold text-sm text-stone-900">法律私隱與 AI 獸醫免責聲明</h3>
               </div>
               <button
+                type="button"
                 onClick={() => setShowPrivacyModal(false)}
                 className="text-stone-400 hover:text-stone-600 font-bold cursor-pointer"
               >
@@ -761,7 +720,10 @@ export const ReportForm: React.FC<ReportFormProps> = ({
               <div>
                 <h4 className="font-bold text-stone-900 mb-1">1. 收集個人資料聲明 (PICS)</h4>
                 <p>
-                  依據香港《個人資料（私隱）條例》，閣下所提供之稱呼、電話及位置資料，僅用於本平台及受委託動物福利機構（NGO）聯絡現場、確認動物最新位置及跟進救援進度。本平台絕不會將閣下個人資料轉售或用於任何商業推廣。
+                  我們依照閣下所在地適用的個人資料保護法例（例如香港《個人資料（私隱）條例》、歐盟 GDPR）處理閣下的資料。
+                  稱呼、電話及電郵只用於本平台及受委託動物福利機構聯絡閣下、確認動物位置及跟進救援進度，不會公開，亦不會出售或用於商業推廣。
+                  動物相片、位置及描述會公開顯示，以便救援人員及義工協助；請避免拍攝人面、車牌或住宅門牌。相片及描述會傳送至 Google Gemini 作 AI 分析。
+                  如需查閱或刪除閣下的資料，請聯絡平台管理員。
                 </p>
               </div>
 
@@ -778,12 +740,19 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                   極度危急 (P0) 個案指引
                 </h4>
                 <p className="text-2xs leading-relaxed">
-                  若動物出現大出血、被車輛撞擊昏迷、肢體嚴重扭曲骨折或呼吸困難，請勿等待應用程式文字回覆，建議直接致電愛護動物協會 (SPCA) 24 小時熱線 <strong>2711 1000</strong> 尋求即時救助車馳援。
+                  若動物出現大出血、被車撞昏迷、肢體嚴重骨折或呼吸困難，請勿等待應用程式回覆，
+                  {(() => {
+                    const c = getEmergencyContact();
+                    return c
+                      ? <>建議直接致電 {c.name} <strong>{c.phone}</strong> 尋求即時救助。</>
+                      : <>請直接聯絡當地動物救援機構、獸醫診所或警方。</>;
+                  })()}
                 </p>
               </div>
             </div>
 
             <button
+              type="button"
               onClick={() => setShowPrivacyModal(false)}
               className="w-full py-2.5 rounded-xl bg-stone-900 text-white font-bold text-xs cursor-pointer"
             >

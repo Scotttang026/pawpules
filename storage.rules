@@ -10,7 +10,7 @@ service firebase.storage {
       allow create: if request.resource.size > 0
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType == 'image/jpeg'
-        && fileName.matches('^[A-Za-z0-9_-]{1,100}\\.jpg$');
+        && fileName.matches('^PW-[A-Z0-9]{1,20}-[A-Z0-9]{1,8}\\.jpg$');
       allow update, delete: if false;
     }
     match /{allPaths=**} {

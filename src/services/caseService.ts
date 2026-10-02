@@ -1,19 +1,12 @@
 import {
-  collection,
-  doc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  onSnapshot,
-  query,
-  serverTimestamp,
-  getDoc,
-  writeBatch,
+  collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query,
+  serverTimestamp, getDoc, writeBatch, DocumentData,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { StrayReport, CaseStatus, NGOOrganization, AnimalType, UrgencyLevel } from '../types';
 import { calculateDistanceKm } from '../utils/location';
 import { monitoring } from '../utils/monitoring';
+import { apiFetch } from './api';
 
 export const CASE_COLLECTION = 'case';
 export const NGO_COLLECTION = 'ngodatail';
@@ -29,13 +22,39 @@ export interface ReporterContactInfo {
 }
 
 /**
- * Real-time listener for stray animal rescue cases from the public 'case' table.
- *
- * ⚠️ 私隱保護：報案人聯絡資料（reporterName / reporterPhone / reporterEmail /
- * createdByUid）已經搬去 /case/{caseId}/private/contact，呢份子集合只有 admin
- * 讀得到。呢個 listener 永遠唔會回傳任何真實聯絡資料，即使 legacy 文件殘留呢些
- * 欄位，都會強制覆寫為空字串，確保公眾讀取絕對唔會洩漏 PII。
+ * 將 Firestore 文件轉換成 StrayReport（公眾版本）。
+ * 永遠唔會回傳聯絡資料；冇有效座標嘅舊文件會回傳 null，唔會再塞香港預設座標。
+ * 亦唔再讀 matchedNGOs：NGO 推薦一律由 ngodatail 即時計算。
  */
+export function docToReport(id: string, data: DocumentData): StrayReport | null {
+  const loc = data.location;
+  if (!loc || typeof loc.lat !== 'number' || typeof loc.lng !== 'number') return null;
+
+  const ai = data.aiAnalysis || data.geminiResponse || null;
+  return {
+    id,
+    title: data.title || `#${id.slice(0, 6)}`,
+    animalType: data.animalType || 'other',
+    customAnimalName: data.customAnimalName || undefined,
+    photoUrl: data.photoUrl || '',
+    storagePath: data.storagePath || '',
+    location: { lat: loc.lat, lng: loc.lng, address: loc.address || '', district: loc.district },
+    description: data.description || '',
+    reporterName: '',
+    reporterPhone: '',
+    reporterEmail: '',
+    createdByUid: undefined,
+    createdAt: data.createdAt?.toDate
+      ? data.createdAt.toDate().toISOString()
+      : data.createdAt || new Date().toISOString(),
+    status: data.status || 'pending',
+    urgency: data.urgency || 'P1',
+    geminiResponse: ai,
+    aiAnalysis: ai,
+    dispatchedToNGO: data.dispatchedToNGO || undefined,
+  };
+}
+
 export function subscribeToCases(
   onUpdate: (cases: StrayReport[]) => void,
   onError?: (err: Error) => void
@@ -44,38 +63,13 @@ export function subscribeToCases(
   return onSnapshot(
     q,
     (snapshot) => {
-      if (snapshot.empty) {
-        onUpdate([]);
-        return;
-      }
-      const loadedCases: StrayReport[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const geminiResp = data.geminiResponse || data.aiAnalysis || null;
-        loadedCases.push({
-          id: docSnap.id,
-          title: data.title || `通報 #${docSnap.id.slice(0, 6)}`,
-          animalType: data.animalType || 'other',
-          customAnimalName: data.customAnimalName,
-          photoUrl: data.photoUrl || '',
-          storagePath: data.storagePath || '',
-          location: data.location || { lat: 22.3193, lng: 114.1694, address: '未提供地址' },
-          description: data.description || '',
-          reporterName: '',
-          reporterPhone: '',
-          reporterEmail: '',
-          createdByUid: undefined,
-          createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : data.createdAt || new Date().toISOString(),
-          status: data.status || 'pending',
-          urgency: data.urgency || 'P1',
-          geminiResponse: geminiResp,
-          aiAnalysis: geminiResp,
-          matchedNGOs: data.matchedNGOs,
-          dispatchedToNGO: data.dispatchedToNGO,
-        });
+      const loaded: StrayReport[] = [];
+      snapshot.forEach((d) => {
+        const r = docToReport(d.id, d.data());
+        if (r) loaded.push(r);
       });
-      loadedCases.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      onUpdate(loadedCases);
+      loaded.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      onUpdate(loaded);
     },
     (error) => {
       monitoring.captureError(error, { context: 'subscribeToCases' });
@@ -84,6 +78,7 @@ export function subscribeToCases(
     }
   );
 }
+
 
 /**
  * Save a new report using an atomic batch write:
@@ -112,10 +107,9 @@ export async function createCaseInFirestore(report: StrayReport): Promise<void> 
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       status: 'pending',
-      urgency: report.urgency,
-      geminiResponse: report.geminiResponse || report.aiAnalysis || null,
-      aiAnalysis: report.aiAnalysis || report.geminiResponse || null,
-      matchedNGOs: report.matchedNGOs || null,
+      urgency: 'P1', // 真正緊急度由 server AI 分析後寫入
+      geminiResponse: null,
+      aiAnalysis: null,
       dispatchedToNGO: report.dispatchedToNGO || null,
     };
 
@@ -190,19 +184,15 @@ export async function updateCaseStatusInFirestore(
   }
 }
 
-/**
- * ⚠️ 注意：此操作唔會自動刪除 /private/contact 子文件（Firestore 刪除母
- * 文件唔會連帶刪除子集合）。如需徹底清除報案人資料，請另外用 Admin SDK
- * 或 Cloud Function 處理子集合刪除。
- */
+/** 交由 server 一次過刪除案件、聯絡資料同 Storage 相片（只限 admin） */
 export async function deleteCaseInFirestore(caseId: string): Promise<void> {
   try {
-    const caseRef = doc(db, CASE_COLLECTION, caseId);
-    await deleteDoc(caseRef);
-    monitoring.log('warn', 'firestore', `Deleted case #${caseId} from case table`);
+    const res = await apiFetch(`/api/admin/cases/${encodeURIComponent(caseId)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`Delete failed: HTTP ${res.status}`);
+    monitoring.log('warn', 'firestore', `Deleted case #${caseId} with contact and photo`);
   } catch (err) {
     monitoring.captureError(err, { caseId });
-    handleFirestoreError(err, OperationType.DELETE, `${CASE_COLLECTION}/${caseId}`);
+    throw err;
   }
 }
 

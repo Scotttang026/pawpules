@@ -38,29 +38,14 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
   );
 
   const handleDispatch = async (ngo: NGOOrganization) => {
-    if (dispatchedSuccessId === ngo.id) return;
+  if (!onDispatchToNGO || dispatchedSuccessId === ngo.id) return;
     setDispatchingId(ngo.id);
     try {
-      if (onDispatchToNGO) {
-        await onDispatchToNGO(ngo.id, ngo.name);
-      } else {
-        // Fallback：僅喺父層冇提供 onDispatchToNGO 時使用，
-        // 目前 App.tsx 兩處呼叫都必定會傳入該 prop，此路徑屬於防禦性備援。
-        await fetch('/api/ngo/notify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            reportId: report.id,
-            ngoId: ngo.id,
-            ngoName: ngo.name,
-            urgency: report.urgency,
-          }),
-        });
-      }
+      await onDispatchToNGO(ngo.id, ngo.name);
       setDispatchedSuccessId(ngo.id);
     } catch (err) {
       console.error('Failed to notify NGO:', err);
-      alert('通知 NGO 失敗，請稍後再試或直接致電機構熱線。');
+          alert(err instanceof Error && err.message ? err.message : '通知 NGO 失敗，請稍後再試或直接致電機構熱線。');
     } finally {
       setDispatchingId(null);
     }
@@ -82,9 +67,9 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
     const animalLabel = getAnimalTypeLabel(report.animalType);
     const trackingUrl = `${window.location.origin}/?caseId=${encodeURIComponent(report.id)}`;
 
-    const contactLine = isAdmin
+        const contactLine = isAdmin
       ? `通報人電話: ${report.reporterPhone}`
-      : `詳細聯絡資訊請查閱案件追蹤連結: ${trackingUrl}`;
+      : `案件追蹤連結: ${trackingUrl}`;
 
     return [
       '【PawPulse 流浪動物通報求助】',
@@ -198,7 +183,7 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-stone-200/80">
                 <div className="flex items-center gap-2 flex-wrap">
                   <a
-                    href={`tel:${ngo.hotline.replace(/\s+/g, '')}`}
+                    href={`tel:${ngo.hotline.replace(/[^\d+]/g, '')}`}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 transition-colors shadow-xs"
                     id={`btn-call-${ngo.id}`}
                   >
@@ -208,7 +193,7 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
 
                   {ngo.whatsapp && (
                     <a
-                      href={`https://wa.me/852${ngo.whatsapp.replace(/\s+/g, '')}?text=${encodeURIComponent(
+                      href={`https://wa.me/${ngo.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(
                         buildWhatsAppMessage()
                       )}`}
                       target="_blank"
@@ -239,7 +224,7 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                       {isAdmin ? '已向機構送交通報 (已接案)' : '已通知機構，等候救援隊確認接案'}
                     </div>
-                  ) : (
+                  ) : onDispatchToNGO ? (
                     <button
                       type="button"
                       onClick={() => handleDispatch(ngo)}
@@ -250,7 +235,7 @@ export const NGOMatchFeedback: React.FC<NGOMatchFeedbackProps> = ({
                       <Send className="w-3.5 h-3.5" />
                       {isSubmitting ? '派送中...' : '送交通報 + AI 報告'}
                     </button>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </div>

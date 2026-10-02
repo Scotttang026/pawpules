@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { fetchCaseContact, ReporterContactInfo } from '../services/caseService';
+import AddressAutocomplete from './AddressAutocomplete';
 
 interface AdminDashboardProps {
   reports: StrayReport[];
@@ -36,12 +37,6 @@ const ANIMAL_TYPE_OPTIONS: { value: AnimalType; label: string }[] = [
   { value: 'bird', label: '雀鳥' },
   { value: 'other', label: '其他' },
 ];
-
-function parseCoordinate(value: string, fallback: number, min: number, max: number): number {
-  const parsed = parseFloat(value);
-  if (!Number.isFinite(parsed) || parsed < min || parsed > max) return fallback;
-  return parsed;
-}
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   reports,
@@ -64,9 +59,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newNGOHotline, setNewNGOHotline] = useState('');
   const [newNGOWhatsapp, setNewNGOWhatsapp] = useState('');
   const [newNGOAddress, setNewNGOAddress] = useState('');
-  const [newNGODistrict, setNewNGODistrict] = useState('九龍');
-  const [newNGOLat, setNewNGOLat] = useState('22.3193');
-  const [newNGOLng, setNewNGOLng] = useState('114.1694');
+  const [newNGODistrict, setNewNGODistrict] = useState('');
+  const [newNGOLat, setNewNGOLat] = useState('');
+  const [newNGOLng, setNewNGOLng] = useState('');
   const [newNGOOperatingHours, setNewNGOOperatingHours] = useState('24 小時急救出勤');
   const [newNGO24h, setNewNGO24h] = useState(true);
   const [newNGOSpecialties, setNewNGOSpecialties] = useState('流浪貓狗急救, 骨折外傷, 誘捕安置');
@@ -88,9 +83,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setNewNGOHotline('');
     setNewNGOWhatsapp('');
     setNewNGOAddress('');
-    setNewNGODistrict('九龍');
-    setNewNGOLat('22.3193');
-    setNewNGOLng('114.1694');
+    setNewNGODistrict('');
+    setNewNGOLat('');
+    setNewNGOLng('');
     setNewNGOOperatingHours('24 小時急救出勤');
     setNewNGO24h(true);
     setNewNGOSpecialties('流浪貓狗急救, 骨折外傷, 誘捕安置');
@@ -105,17 +100,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
 
     const ngoId = `ngo_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-    const parsedLat = parseCoordinate(newNGOLat, 22.3193, -90, 90);
-    const parsedLng = parseCoordinate(newNGOLng, 114.1694, -180, 180);
+    const parsedLat = parseFloat(newNGOLat);
+    const parsedLng = parseFloat(newNGOLng);
+    if (
+      !Number.isFinite(parsedLat) || parsedLat < -90 || parsedLat > 90 ||
+      !Number.isFinite(parsedLng) || parsedLng < -180 || parsedLng > 180
+    ) {
+      alert('請喺地址欄揀一個建議地址，或者手動填寫正確經緯度');
+      return;
+    }
 
     const newOrg: NGOOrganization = {
       id: ngoId,
       name: newNGOName.trim(),
       englishName: newNGOEnglishName.trim() || newNGOName.trim(),
       hotline: newNGOHotline.trim(),
-      whatsapp: newNGOWhatsapp.trim() || undefined,
-      address: newNGOAddress.trim() || '香港指定救援據點',
-      district: newNGODistrict.trim() || '香港',
+      whatsapp: newNGOWhatsapp.replace(/\D/g, '') || undefined,
+      address: newNGOAddress.trim(),
+      district: newNGODistrict.trim() || '待確認地區',
       lat: parsedLat,
       lng: parsedLng,
       acceptedAnimals: newNGOAcceptedAnimals.length > 0 ? newNGOAcceptedAnimals : ['cat', 'dog', 'other'],
@@ -549,18 +551,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold mb-1">急救專線熱線 *</label>
-                  <input type="tel" value={newNGOHotline} onChange={(e) => setNewNGOHotline(e.target.value)} placeholder="2711 1000" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" required />
+                  <input type="tel" value={newNGOHotline} onChange={(e) => setNewNGOHotline(e.target.value)} placeholder="例如 +852 2711 1000" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" required />
                 </div>
                 <div>
-                  <label className="block font-bold mb-1">WhatsApp 接案</label>
-                  <input type="tel" value={newNGOWhatsapp} onChange={(e) => setNewNGOWhatsapp(e.target.value)} placeholder="85291234567" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                  <label className="block font-bold mb-1">WhatsApp（連國家區號）</label>
+                  <input type="tel" value={newNGOWhatsapp} onChange={(e) => setNewNGOWhatsapp(e.target.value)} placeholder="例如 85291234567" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1">機構地址 / 救助中心</label>
-                <input type="text" value={newNGOAddress} onChange={(e) => setNewNGOAddress(e.target.value)} placeholder="例如：九龍油麻地彌敦道405號" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                <label className="block font-bold mb-1">機構地址 / 救助中心 *</label>
+                <AddressAutocomplete
+                  value={newNGOAddress}
+                  onChange={setNewNGOAddress}
+                  onSelect={(p) => {
+                    setNewNGOAddress(p.address);
+                    setNewNGOLat(String(p.lat));
+                    setNewNGOLng(String(p.lng));
+                    setNewNGODistrict(p.district || '');
+                  }}
+                  onEnter={() => {}}
+                  bias={null}
+                  placeholder="輸入機構地址，揀建議地址會自動填經緯度"
+                />
+                <p className="text-2xs text-stone-400 mt-1">揀咗建議地址之後，下面嘅分區同經緯度會自動填好。</p>
               </div>
+
 
               <div className="grid grid-cols-3 gap-2">
                 <div>
@@ -569,11 +585,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
                 <div>
                   <label className="block font-bold mb-1">緯度 (Lat)</label>
-                  <input type="text" value={newNGOLat} onChange={(e) => setNewNGOLat(e.target.value)} placeholder="22.3193" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                  <input type="text" value={newNGOLat} onChange={(e) => setNewNGOLat(e.target.value)} placeholder="自動填寫" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
                 </div>
                 <div>
                   <label className="block font-bold mb-1">經度 (Lng)</label>
-                  <input type="text" value={newNGOLng} onChange={(e) => setNewNGOLng(e.target.value)} placeholder="114.1694" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                  <input type="text" value={newNGOLng} onChange={(e) => setNewNGOLng(e.target.value)} placeholder="自動填寫" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
                 </div>
               </div>
 

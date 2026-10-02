@@ -46,11 +46,11 @@ service cloud.firestore {
         && isValidLocation(data.location)
         && data.description is string && data.description.size() > 0 && data.description.size() <= 2000
         && data.status == 'pending'
-        && data.urgency in ['P0', 'P1', 'P2']
+        && data.urgency == 'P1'
         && data.createdAt == request.time
         && (!('updatedAt' in data) || data.updatedAt == request.time)
-        && optMapOrNull(data, 'aiAnalysis')
-        && optMapOrNull(data, 'geminiResponse')
+        && (!('aiAnalysis' in data) || data.aiAnalysis == null)
+        && (!('geminiResponse' in data) || data.geminiResponse == null)
         && (!('matchedNGOs' in data) || data.matchedNGOs == null
             || (data.matchedNGOs is list && data.matchedNGOs.size() <= 3))
         && (!('dispatchedToNGO' in data) || data.dispatchedToNGO == null);

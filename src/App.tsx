@@ -22,9 +22,13 @@ import {
   createNGOInFirestore,
   deleteNGOInFirestore,
   updateNGOCapacity,
-  fetchCaseContact,
+  rankFirestoreNGOs,
+  docToReport,
   CASE_COLLECTION,
 } from './services/caseService';
+import { getEmergencyContact, getEmergencyHint, telHref } from './config/emergency';
+import { apiFetch } from './services/api';
+import { getBrowserLanguage } from './utils/locale';
 import {
   MapPin,
   CheckCircle2,
@@ -33,8 +37,11 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 
+const API_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '').replace(/\/$/, '');
+
 function AppContent() {
   const { isAdmin } = useAuth();
+  const emergency = getEmergencyContact();
   const [reports, setReports] = useState<StrayReport[]>([]);
   const [ngos, setNgos] = useState<NGOOrganization[]>([]);
   const [currentTab, setCurrentTab] = useState<'report' | 'map' | 'cases' | 'ngos' | 'admin'>('report');
@@ -76,29 +83,9 @@ function AppContent() {
         const snap = await getDoc(doc(db, CASE_COLLECTION, caseId));
         if (cancelled) return;
 
-        if (snap.exists()) {
-          const data = snap.data() as any;
-          setSelectedReportForModal({
-            id: snap.id,
-            title: data.title || `通報 #${snap.id.slice(0, 6)}`,
-            animalType: data.animalType || 'other',
-            customAnimalName: data.customAnimalName,
-            photoUrl: data.photoUrl || '',
-            storagePath: data.storagePath || '',
-            location: data.location || { lat: 22.3193, lng: 114.1694, address: '未提供地址' },
-            description: data.description || '',
-            reporterName: '',
-            reporterPhone: '',
-            reporterEmail: '',
-            createdByUid: undefined,
-            createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : data.createdAt || new Date().toISOString(),
-            status: data.status || 'pending',
-            urgency: data.urgency || 'P1',
-            geminiResponse: data.geminiResponse || data.aiAnalysis || null,
-            aiAnalysis: data.aiAnalysis || data.geminiResponse || null,
-            matchedNGOs: data.matchedNGOs,
-            dispatchedToNGO: data.dispatchedToNGO,
-          });
+        const r = snap.exists() ? docToReport(snap.id, snap.data()) : null;
+        if (r) {
+          setSelectedReportForModal(r);
         } else {
           alert(`找不到案件 #${caseId}，可能已被刪除或連結有誤。`);
         }
@@ -125,51 +112,62 @@ function AppContent() {
 
   const urgentCount = reports.filter((r) => r.urgency === 'P0' && r.status !== 'rescued' && r.status !== 'closed').length;
 
-  const handleCreateReport = async (newReport: StrayReport): Promise<boolean> => {
+    const handleCreateReport = async (newReport: StrayReport): Promise<boolean> => {
     setSubmitErrorBanner(null);
 
     try {
       await createCaseInFirestore(newReport);
-
-      setReports((prev) => [newReport, ...prev.filter((r) => r.id !== newReport.id)]);
-      setJustSubmittedReport(newReport);
-
-      if (newReport.reporterEmail) {
-        try {
-          const emailRes = await fetch('/api/cases/send-confirmation-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              caseId: newReport.id,
-              reporterEmail: newReport.reporterEmail,
-              reporterName: newReport.reporterName,
-              animalType: newReport.animalType,
-              urgency: newReport.urgency,
-              location: newReport.location,
-            }),
-          });
-
-          if (emailRes.ok) {
-            setEmailConfirmationBanner({
-              caseId: newReport.id,
-              email: newReport.reporterEmail,
-            });
-          } else {
-            console.warn('Confirmation email API returned non-OK status:', emailRes.status);
-          }
-        } catch (emailError) {
-          console.warn('Confirmation email request failed:', emailError);
-        }
-      }
-
-      return true;
     } catch (e) {
       console.error('Failed to create case in Firestore:', e);
-      setSubmitErrorBanner(
-        '通報提交失敗，個案尚未成功儲存。請檢查網絡連線後重試；如情況危急，請直接致電 SPCA 24 小時熱線 2711 1000。'
-      );
+      setSubmitErrorBanner(`通報提交失敗，個案尚未成功儲存。請檢查網絡連線後重試；如情況危急，${getEmergencyHint()}。`);
       return false;
     }
+
+    // 案件已儲存，再請 server 做 AI 分析；失敗都唔影響報案（維持 P1）
+    let finalReport = newReport;
+    try {
+      const aiRes = await apiFetch(`/api/cases/${encodeURIComponent(newReport.id)}/analyze`, {
+        method: 'POST',
+        body: JSON.stringify({ lang: getBrowserLanguage() }),
+      });
+      if (aiRes.ok) {
+        const data = await aiRes.json();
+        if (data?.analysis && ['P0', 'P1', 'P2'].includes(data.urgency)) {
+          finalReport = {
+            ...newReport,
+            urgency: data.urgency,
+            aiAnalysis: data.analysis,
+            geminiResponse: data.analysis,
+            matchedNGOs: rankFirestoreNGOs(
+              ngos, newReport.location.lat, newReport.location.lng, newReport.animalType, data.urgency
+            ).slice(0, 3),
+          };
+        }
+      }
+    } catch (aiErr) {
+      console.warn('AI analysis request failed:', aiErr);
+    }
+
+    setReports((prev) => [finalReport, ...prev.filter((r) => r.id !== finalReport.id)]);
+    setJustSubmittedReport(finalReport);
+
+    if (newReport.reporterEmail) {
+      try {
+        const emailRes = await apiFetch('/api/cases/send-confirmation-email', {
+          method: 'POST',
+          body: JSON.stringify({ caseId: newReport.id }),
+        });
+        if (emailRes.ok) {
+          setEmailConfirmationBanner({ caseId: newReport.id, email: newReport.reporterEmail });
+        } else {
+          console.warn('Confirmation email API returned non-OK status:', emailRes.status);
+        }
+      } catch (emailError) {
+        console.warn('Confirmation email request failed:', emailError);
+      }
+    }
+
+    return true;
   };
 
   const handleUpdateStatus = async (reportId: string, newStatus: CaseStatus) => {
@@ -238,85 +236,29 @@ function AppContent() {
     }
   };
 
-  const handleDispatchToNGO = async (ngoId: string, ngoName: string) => {
+    const handleDispatchToNGO = async (ngoId: string, _ngoName: string) => {
     const targetReport = selectedReportForModal || justSubmittedReport;
     if (!targetReport) return;
 
-    // ⚠️ 核心修正：審核舊案件時（selectedReportForModal 嚟自 subscribeToCases()），
-    // reporterName / reporterPhone 已經喺私隱分層後被強制清空為空字串。
-    // 若唔補救，寄去 /api/ngo/notify 嘅通知會帶住空白電話，令 NGO 完全
-    // 攞唔到報案人嘅真正聯絡方法。因此如果偵測到電話為空且目前使用者係
-    // admin，先向 /case/{caseId}/private/contact 補抓真實資料。
-    // （justSubmittedReport 路徑本身已經帶住真實電話，呢個 fetch 唔會觸發。）
-    let reporterName = targetReport.reporterName;
-    let reporterPhone = targetReport.reporterPhone;
-
-    if (isAdmin && !reporterPhone) {
-      const contact = await fetchCaseContact(targetReport.id);
-      if (contact) {
-        reporterName = contact.reporterName || reporterName;
-        reporterPhone = contact.reporterPhone || reporterPhone;
-      }
+    // 聯絡資料、機構名同權限全部由 server 處理，前端只傳案件同機構編號
+    const res = await apiFetch('/api/ngo/notify', {
+      method: 'POST',
+      body: JSON.stringify({ reportId: targetReport.id, ngoId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error || '通知 NGO 失敗，請稍後再試或直接致電 NGO 熱線。');
     }
 
-    try {
-      const res = await fetch('/api/ngo/notify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          reportId: targetReport.id,
-          ngoId,
-          ngoName,
-          reporterName,
-          reporterPhone,
-          urgency: targetReport.urgency,
-          location: targetReport.location,
-        }),
-      });
+    const receipt = await res.json();
+    const newStatus: CaseStatus =
+      isAdmin && targetReport.status === 'pending' ? 'in_progress' : targetReport.status;
+    const patch = (r: StrayReport): StrayReport =>
+      r.id === targetReport.id ? { ...r, status: newStatus, dispatchedToNGO: receipt.dispatchedToNGO } : r;
 
-      if (!res.ok) {
-        alert('通知 NGO 失敗，請稍後再試或直接致電 NGO 熱線。');
-        return;
-      }
-
-      const receipt = await res.json();
-      const dispatchPayload = {
-        ngoId,
-        ngoName,
-        dispatchedAt: receipt.dispatchedAt,
-        status: 'acknowledged' as const,
-        simulated: !!receipt.simulated,
-      };
-
-      if (isAdmin) {
-        setReports((prev) =>
-          prev.map((r) =>
-            r.id === targetReport.id
-              ? { ...r, status: 'in_progress', dispatchedToNGO: dispatchPayload }
-              : r
-          )
-        );
-        if (selectedReportForModal?.id === targetReport.id) {
-          setSelectedReportForModal((prev) =>
-            prev ? { ...prev, status: 'in_progress', dispatchedToNGO: dispatchPayload } : null
-          );
-        }
-        if (justSubmittedReport?.id === targetReport.id) {
-          setJustSubmittedReport((prev) =>
-            prev ? { ...prev, status: 'in_progress', dispatchedToNGO: dispatchPayload } : null
-          );
-        }
-
-        try {
-          await updateCaseStatusInFirestore(targetReport.id, 'in_progress', dispatchPayload);
-        } catch (persistErr) {
-          console.error('Failed to persist dispatch status:', persistErr);
-        }
-      }
-    } catch (err) {
-      console.error('Dispatch error:', err);
-      alert('通知 NGO 時發生錯誤，請稍後再試。');
-    }
+    setReports((prev) => prev.map(patch));
+    setSelectedReportForModal((prev) => (prev ? patch(prev) : null));
+    setJustSubmittedReport((prev) => (prev ? patch(prev) : null));
   };
 
   const handleUpdateNGOCapacity = async (ngoId: string, capacity: 'available' | 'busy' | 'full') => {
@@ -376,10 +318,12 @@ function AppContent() {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <a href="tel:27111000" className="hidden sm:inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-rose-800 hover:bg-rose-900 text-white font-bold text-xs">
-                <PhoneCall className="w-3.5 h-3.5 text-rose-300" />
-                SPCA 24h 熱線
-              </a>
+              {emergency && (
+                <a href={telHref(emergency.phone)} className="hidden sm:inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-rose-800 hover:bg-rose-900 text-white font-bold text-xs">
+                  <PhoneCall className="w-3.5 h-3.5 text-rose-300" />
+                  {emergency.name}
+                </a>
+              )}
               <button onClick={() => setCurrentTab('cases')} className="px-3 py-1 rounded-xl bg-white text-rose-700 font-bold hover:bg-rose-50 transition-colors shrink-0 text-xs cursor-pointer">
                 檢視危急個案 →
               </button>
@@ -444,7 +388,7 @@ function AppContent() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-bold text-stone-900">全港流浪動物救援即時地圖 (Firestore 實時同步)</h2>
+                <h2 className="text-xl font-bold text-stone-900">流浪動物救援即時地圖 (Firestore 實時同步)</h2>
                 <p className="text-xs text-stone-500">即時標註待救援貓狗個案（紅：P0危急／橙：P1醫療／綠：P2穩定）與 NGO 庇護站位置</p>
               </div>
               <button onClick={() => setCurrentTab('report')} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 text-white font-bold text-xs shadow-xs hover:bg-amber-600 transition-colors cursor-pointer">
@@ -501,7 +445,7 @@ function AppContent() {
             <span>Firebase 雲端持久化 × Google Gemini 多模態 AI</span>
           </div>
           <p className="max-w-xl mx-auto text-stone-400">
-            依照香港《個人資料（私隱）條例》保護通報者私隱。若遇嚴重緊急車禍或瀕危動物，請同時致電 SPCA 24 小時熱線 2711 1000。
+            我們依照適用的個人資料保護法例處理通報者資料。若遇嚴重車禍或瀕危動物，{getEmergencyHint()}。
           </p>
         </div>
       </footer>
@@ -509,9 +453,10 @@ function AppContent() {
       {selectedReportForModal && (
         <CaseDetailModal
           report={selectedReportForModal}
+          ngos={ngos}
           onClose={() => setSelectedReportForModal(null)}
           onUpdateStatus={isAdmin ? handleUpdateStatus : undefined}
-          onDispatchToNGO={handleDispatchToNGO}
+          onDispatchToNGO={isAdmin ? handleDispatchToNGO : undefined}
           onDeleteCase={isAdmin ? handleDeleteCase : undefined}
         />
       )}

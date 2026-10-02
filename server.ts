@@ -1,11 +1,12 @@
 import express, { NextFunction, Request, Response } from "express";
 import path from "path";
-import fs from "fs";
 import { randomUUID } from "crypto";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
-import { initializeApp, getApps } from "firebase-admin/app";
+import { initializeApp, getApps, App } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
+import { getFirestore, FieldValue, Timestamp, Firestore } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
 import { AIAnalysisResult } from "./src/types";
 
 // 先讀 .env.local（本機開發），再讀 .env；同一個 key 以先讀到嘅為準
@@ -29,8 +30,8 @@ app.use("/api", (req: Request, res: Response, next: NextFunction) => {
   if (origin && ALLOWED_ORIGINS.has(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.setHeader("Access-Control-Max-Age", "86400");
   }
   if (req.method === "OPTIONS") {
@@ -97,6 +98,8 @@ const uploadRateLimitMiddleware = makeRateLimit("upload", 20, 60, "上傳過於�
 const geocodeRateLimitMiddleware = makeRateLimit("geocode", 30, 60, "地址查詢請求過於頻繁，請稍候再試");
 const placesRateLimitMiddleware = makeRateLimit("places", 60, 60, "搜尋太頻密，請稍後再試。");
 const emailIpRateLimitMiddleware = makeRateLimit("email_ip", 10, 300, "發信過於頻繁，請稍後再試");
+const dispatchRateLimitMiddleware = makeRateLimit("dispatch", 10, 300, "派送過於頻繁，請稍後再試");
+const adminRateLimitMiddleware = makeRateLimit("admin", 60, 60, "操作過於頻繁，請稍後再試");
 
 // AI 每日總上限（每個 Cloud Run instance 各自計），防止有人狂打燒晒 Gemini 額度
 const AI_DAILY_LIMIT = Number(process.env.AI_DAILY_LIMIT) || 500;
@@ -120,33 +123,75 @@ function maskEmail(email: string): string {
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// 本機開發先用磁碟儲存（Cloud Run 嘅磁碟係暫時性，正式環境一律用 Cloud Storage）
-const uploadsDir = path.resolve(process.cwd(), "public", "uploads");
-if (!IS_PROD) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-  app.use(
-    "/uploads",
-    (_req: Request, res: Response, next: NextFunction) => {
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      next();
-    },
-    express.static(uploadsDir)
+// ---------- Firebase Admin（Firestore + Storage + Auth）----------
+// Cloud Run 會自動用服務帳戶；本機要先執行 gcloud auth application-default login
+const STORAGE_BUCKET = (process.env.FIREBASE_STORAGE_BUCKET || "").replace(/^gs:\/\//, "").trim();
+const FIREBASE_PROJECT_ID = (process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || "").trim();
+const FIRESTORE_DATABASE_ID = (process.env.FIRESTORE_DATABASE_ID || "").trim();
+
+function getAdminApp(): App {
+  return (
+    getApps()[0] ??
+    initializeApp({
+      ...(FIREBASE_PROJECT_ID && { projectId: FIREBASE_PROJECT_ID }),
+      ...(STORAGE_BUCKET && { storageBucket: STORAGE_BUCKET }),
+    })
   );
 }
 
-// ---------- Firebase Admin（Cloud Storage）----------
-// Cloud Run 上會自動用服務帳戶憑證（ADC），唔使下載任何 JSON key
-const STORAGE_BUCKET = (process.env.FIREBASE_STORAGE_BUCKET || "").replace(/^gs:\/\//, "").trim();
+let adminDb: Firestore | null = null;
+function getAdminDb(): Firestore {
+  if (!adminDb) {
+    const a = getAdminApp();
+    adminDb = FIRESTORE_DATABASE_ID ? getFirestore(a, FIRESTORE_DATABASE_ID) : getFirestore(a);
+  }
+  return adminDb;
+}
 
 function getAdminBucket() {
   if (!STORAGE_BUCKET) return null;
-  if (getApps().length === 0) {
-    initializeApp({ storageBucket: STORAGE_BUCKET });
+  return getStorage(getAdminApp()).bucket();
+}
+
+const CASE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const STORAGE_PATH_RE = /^animal-reports\/[A-Za-z0-9_-]+\.(jpg|png|webp)$/;
+const FRESH_CASE_WINDOW_MS = 15 * 60 * 1000; // 案件建立後 15 分鐘內先可以做 AI 分析、寄信、報案人派送
+
+function isFreshCase(data: Record<string, any> | undefined): boolean {
+  const ts = data?.createdAt;
+  return ts instanceof Timestamp && Date.now() - ts.toMillis() < FRESH_CASE_WINDOW_MS;
+}
+
+// 驗證 Firebase 登入 token，再確認係咪 adminuser；任何失敗都當非管理員
+async function getAdminUid(req: Request): Promise<string | null> {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) return null;
+  try {
+    const decoded = await getAuth(getAdminApp()).verifyIdToken(header.slice(7));
+    const snap = await getAdminDb().collection("adminuser").doc(decoded.uid).get();
+    return snap.exists ? decoded.uid : null;
+  } catch {
+    return null;
   }
-  return getStorage().bucket();
+}
+
+// 每宗案件每種動作只可以做一次（create 遇到已存在嘅文件會失敗，所以係原子操作）
+async function claimOnce(kind: string, caseId: string): Promise<boolean> {
+  try {
+    await getAdminDb()
+      .collection("serverLocks")
+      .doc(`${kind}_${caseId}`)
+      .create({ createdAt: FieldValue.serverTimestamp() });
+    return true;
+  } catch (err: any) {
+    if (err?.code === 6) return false; // ALREADY_EXISTS
+    throw err;
+  }
 }
 
 // ---------- Gemini ----------
+
+const GEMINI_MODEL = "gemini-3.8-flash";
 
 function getGeminiApiKey(): string | undefined {
   return (
@@ -183,7 +228,7 @@ app.get("/api/ai/status", (_req: Request, res: Response) => {
   res.json({
     status: key ? "configured" : "missing_key",
     hasApiKey: !!key,
-    model: "gemini-3.8-flash",
+    model: GEMINI_MODEL,
   });
 });
 
@@ -509,7 +554,7 @@ app.get("/api/places/details/:placeId", placesRateLimitMiddleware, async (req: R
     return;
   }
 
-  const { placeId } = req.params;
+  const placeId = String(req.params.placeId ?? "");
   if (!PLACE_ID_RE.test(placeId)) {
     res.status(400).json({ error: "無效地點" });
     return;
@@ -565,93 +610,69 @@ app.get("/api/places/details/:placeId", placesRateLimitMiddleware, async (req: R
 
 // ---------- 相片上傳（後備路線；主要路線係前端直接上 Firebase Storage）----------
 
-function detectImageType(buffer: Buffer): "jpg" | "png" | "webp" | null {
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
-    return "jpg";
-  }
-  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-  )) {
-    return "png";
-  }
-  if (buffer.length >= 12 &&
-    buffer.toString("ascii", 0, 4) === "RIFF" &&
-    buffer.toString("ascii", 8, 12) === "WEBP") {
-    return "webp";
-  }
-  return null;
+function isJpeg(buffer: Buffer): boolean {
+  return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
 }
-
-const IMAGE_MIME = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" } as const;
 
 app.post("/api/upload-photo", uploadRateLimitMiddleware, async (req: Request, res: Response) => {
   try {
     const { imageBase64, caseId } = req.body ?? {};
-
+    if (typeof caseId !== "string" || !CASE_ID_RE.test(caseId)) {
+      res.status(400).json({ error: "案件編號格式不正確" });
+      return;
+    }
     if (typeof imageBase64 !== "string" || imageBase64.length === 0) {
       res.status(400).json({ error: "Missing imageBase64" });
       return;
     }
 
-    const match = imageBase64.match(/^data:(image\/jpeg|image\/jpg|image\/png|image\/webp);base64,(.+)$/i);
-    const encoded = match ? match[2] : imageBase64.replace(/^data:image\/\w+;base64,/, "");
-
+    const encoded = imageBase64.replace(/^data:image\/jpe?g;base64,/i, "");
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
       res.status(400).json({ error: "圖片資料格式無效" });
       return;
     }
-
     const buffer = Buffer.from(encoded, "base64");
-    if (buffer.length === 0 || buffer.length > 8 * 1024 * 1024) {
+    if (buffer.length === 0 || buffer.length >= 5 * 1024 * 1024) {
       res.status(413).json({ error: "圖片檔案過大，請先壓縮後再行上傳" });
       return;
     }
-
-    const detectedType = detectImageType(buffer);
-    if (!detectedType) {
-      res.status(400).json({ error: "檔案內容並非有效圖片，僅接受 JPG、PNG、WebP" });
+    if (!isJpeg(buffer)) {
+      res.status(400).json({ error: "只接受 JPEG 相片" });
       return;
     }
 
-    const safeCaseId =
-      (typeof caseId === "string" ? caseId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80) : "") ||
-      `PW-${Date.now()}`;
-    const filename = `${safeCaseId}_${Date.now()}.${detectedType}`;
-    const objectPath = `animal-reports/${filename}`;
-
-    // 正式做法：存入 Firebase Cloud Storage（同前端直接上傳用同一個 bucket、同一個資料夾）
     const bucket = getAdminBucket();
-    if (bucket) {
-      const token = randomUUID();
+    if (!bucket) {
+      console.error("[Upload] FIREBASE_STORAGE_BUCKET 未設定");
+      res.status(503).json({ error: "相片儲存服務未設定" });
+      return;
+    }
+
+    // 檔名必須等於案件編號，同 firestore.rules / storage.rules 嘅檢查一致
+    const objectPath = `animal-reports/${caseId}.jpg`;
+    const token = randomUUID();
+    try {
       await bucket.file(objectPath).save(buffer, {
         resumable: false,
-        contentType: IMAGE_MIME[detectedType],
+        contentType: "image/jpeg",
+        preconditionOpts: { ifGenerationMatch: 0 }, // 已有同名相片就拒絕，唔准覆蓋
         metadata: {
           cacheControl: "public, max-age=31536000",
-          metadata: {
-            firebaseStorageDownloadTokens: token, // 令 URL 格式同前端 getDownloadURL() 一樣
-            caseId: safeCaseId,
-            uploadedVia: "server-proxy",
-          },
+          metadata: { firebaseStorageDownloadTokens: token, caseId, uploadedVia: "server-proxy" },
         },
       });
-      const downloadUrl =
-        `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/` +
-        `${encodeURIComponent(objectPath)}?alt=media&token=${token}`;
-      console.log(`[Upload] Saved to Cloud Storage: ${objectPath}`);
-      res.json({ success: true, downloadUrl, storagePath: objectPath });
-      return;
+    } catch (err: any) {
+      if (err?.code === 412) {
+        res.status(409).json({ error: "此案件已有相片" });
+        return;
+      }
+      throw err;
     }
 
-    // 本機開發冇設定 bucket：暫存喺 public/uploads
-    if (!IS_PROD) {
-      await fs.promises.writeFile(path.join(uploadsDir, filename), buffer);
-      res.json({ success: true, downloadUrl: `/uploads/${filename}`, storagePath: objectPath });
-      return;
-    }
-
-    console.error("[Upload] FIREBASE_STORAGE_BUCKET 未設定，正式環境無法儲存相片");
-    res.status(503).json({ error: "相片儲存服務未設定" });
+    const downloadUrl =
+      `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/` +
+      `${encodeURIComponent(objectPath)}?alt=media&token=${token}`;
+    res.json({ success: true, downloadUrl, storagePath: objectPath });
   } catch (err) {
     console.error("[Upload] Photo upload error:", (err as Error).message);
     res.status(500).json({ error: "相片儲存失敗" });
@@ -662,48 +683,43 @@ app.get("/api/ngos", (_req: Request, res: Response) => {
   res.json([]);
 });
 
-// ---------- AI 分析 ----------
+// ---------- AI 分析（案件建立後由 server 執行，結果直接寫入 Firestore）----------
 
-const ALLOWED_ANIMAL_HINTS = new Set(["cat", "dog", "other"]);
+const ALLOWED_ANIMAL_HINTS = new Set(["cat", "dog", "bird", "other"]);
 
-app.post("/api/ai/analyze-stray", aiRateLimitMiddleware, async (req: Request, res: Response) => {
-  try {
-    const { imageBase64, mimeType = "image/jpeg", animalTypeHint, description } = req.body ?? {};
+function cleanStr(v: unknown, max = 300): string {
+  return typeof v === "string" ? v.trim().slice(0, max) : "";
+}
 
-    if (typeof imageBase64 !== "string" || imageBase64.length === 0) {
-      res.status(400).json({ error: "Missing imageBase64 payload" });
-      return;
-    }
+function cleanList(v: unknown, maxItems = 8, maxLen = 200): string[] {
+  return Array.isArray(v)
+    ? v
+        .filter((x): x is string => typeof x === "string" && x.trim() !== "")
+        .slice(0, maxItems)
+        .map((x) => x.trim().slice(0, maxLen))
+    : [];
+}
 
-    const allowedMimes = ["image/jpeg", "image/png", "image/webp", "image/jpg"];
-    if (!allowedMimes.includes(String(mimeType).toLowerCase())) {
-      res.status(400).json({ error: "不支援的圖片格式，僅接受 JPG, PNG, WebP" });
-      return;
-    }
+async function runGeminiAnalysis(
+  imageBase64: string,
+  animalType: unknown,
+  description: unknown,
+  lang: string
+): Promise<AIAnalysisResult | null> {
+  if (!getGeminiApiKey()) {
+    console.error("[Gemini] No API key available — skipping Gemini call");
+    return null;
+  }
 
-    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-    if (cleanBase64.length > 10 * 1024 * 1024) {
-      res.status(413).json({ error: "圖片檔案過大，請先壓縮後再行上傳" });
-      return;
-    }
+  const safeHint =
+    typeof animalType === "string" && ALLOWED_ANIMAL_HINTS.has(animalType) ? animalType : "Unspecified";
+  const safeDescription =
+    typeof description === "string" && description.trim()
+      ? description.trim().slice(0, 1000).replace(/"""/g, "'''")
+      : "None provided";
 
-    // 超出每日總額度：唔阻止報案，只係跳過 AI（前端會自動當 P1 處理）
-    if (!consumeDailyAiQuota()) {
-      console.warn(`[Gemini] 已達每日上限 ${AI_DAILY_LIMIT}，跳過 AI 分析`);
-      res.json({ noResponse: true, message: "今日 AI 分析額度已用完", analysisResult: null });
-      return;
-    }
-
-    const safeHint =
-      typeof animalTypeHint === "string" && ALLOWED_ANIMAL_HINTS.has(animalTypeHint)
-        ? animalTypeHint
-        : "Unspecified (cat/dog/other)";
-    const safeDescription =
-      typeof description === "string" && description.trim()
-        ? description.trim().slice(0, 1000).replace(/"""/g, "'''")
-        : "None provided";
-
-    const promptText = `
+  // lang 已經過 LANG_RE 驗證，可以安全放入 prompt
+  const promptText = `
 You are the emergency veterinarian and rescue coordinator AI for "PawPulse", an urgent stray animal rescue platform used by citizens and rescue NGOs worldwide.
 Analyze this photo of a stray or injured animal reported by a citizen.
 User provided context:
@@ -713,120 +729,180 @@ User provided context:
 ${safeDescription}
 """
 
-Please perform a thorough, professional assessment in Traditional Chinese (繁體中文):
+Write every text field in the language identified by the BCP 47 tag "${lang}". If you cannot write that language, use Traditional Chinese.
 1. Identify species and estimate breed / physical features.
-2. Carefully inspect visible signs of physical trauma, injuries, wounds, fractures, dehydration, skin diseases (e.g. mange, fungal), eye infections, posture (e.g. inability to stand, limp, curling).
+2. Carefully inspect visible signs of physical trauma, injuries, wounds, fractures, dehydration, skin diseases, eye infections, posture.
 3. Assign an urgency triage level based on what is VISIBLE in the photo (the description may support but must not override clear visual evidence):
-   - "P0" (極度緊急): Life-threatening, heavy bleeding, suspected motor vehicle collision trauma, pelvic/spine injury, severe breathing distress, shock, unconsciousness. Immediate 24h rescue ambulance required.
-   - "P1" (需醫療關注): Obvious fractures, open wounds, infected eyes/skin, puppy/kitten in distress, malnourished, requiring veterinary care within hours.
-   - "P2" (穩定/走失): Stable condition, stray or lost pet, friendly, wandering, needs capture/chip scan/shelter without critical life-threatening injuries.
-4. Urgency reason: Concise 1-2 sentence medical/rescue justification.
-5. Rescue equipment needed: Essential tools for NGO rescue team (e.g., 誘捕籠, 厚防咬手套, 急救止血敷料, 犬用口套, 大型犬擔架布, 晶片掃描器, 專用航空箱, 暖水袋).
-6. First-aid advice for citizens on the scene: 3-4 safe, actionable instructions while waiting. Do not reference any country-specific hotline numbers.
-7. Handling precautions: Safety warnings for rescuers and citizens.
+   - "P0": Life-threatening, heavy bleeding, suspected vehicle trauma, pelvic/spine injury, severe breathing distress, shock, unconsciousness.
+   - "P1": Obvious fractures, open wounds, infected eyes/skin, young animal in distress, malnourished, needs veterinary care within hours.
+   - "P2": Stable condition, stray or lost pet, needs capture/chip scan/shelter without critical injuries.
+4. Urgency reason: concise 1-2 sentence justification.
+5. Rescue equipment needed for the NGO rescue team.
+6. First-aid advice for citizens on the scene: 3-4 safe, actionable instructions. Do not reference any country-specific hotline numbers.
+7. Handling precautions for rescuers and citizens.
 8. Confidence score between 0.70 and 0.99.
 
 Ensure output is strictly JSON conforming to the response schema.
 `;
 
-    let analysisResult: AIAnalysisResult | null = null;
-    const apiKey = getGeminiApiKey();
-
-    if (apiKey) {
-      try {
-        const ai = getGeminiClient();
-        const response = await ai.models.generateContent({
-          model: "gemini-3.8-flash",
-          contents: {
-            parts: [
-              { inlineData: { mimeType, data: cleanBase64 } },
-              { text: promptText },
-            ],
+  try {
+    const response = await getGeminiClient().models.generateContent({
+      model: GEMINI_MODEL,
+      contents: {
+        parts: [{ inlineData: { mimeType: "image/jpeg", data: imageBase64 } }, { text: promptText }],
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            identifiedSpecies: { type: Type.STRING },
+            estimatedBreed: { type: Type.STRING },
+            appearanceDescription: { type: Type.STRING },
+            apparentInjuries: { type: Type.ARRAY, items: { type: Type.STRING } },
+            urgencyLevel: { type: Type.STRING },
+            urgencyReason: { type: Type.STRING },
+            rescueEquipment: { type: Type.ARRAY, items: { type: Type.STRING } },
+            firstAidAdvice: { type: Type.ARRAY, items: { type: Type.STRING } },
+            handlingPrecautions: { type: Type.ARRAY, items: { type: Type.STRING } },
+            confidenceScore: { type: Type.NUMBER },
           },
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                identifiedSpecies: { type: Type.STRING },
-                estimatedBreed: { type: Type.STRING },
-                appearanceDescription: { type: Type.STRING },
-                apparentInjuries: { type: Type.ARRAY, items: { type: Type.STRING } },
-                urgencyLevel: { type: Type.STRING },
-                urgencyReason: { type: Type.STRING },
-                rescueEquipment: { type: Type.ARRAY, items: { type: Type.STRING } },
-                firstAidAdvice: { type: Type.ARRAY, items: { type: Type.STRING } },
-                handlingPrecautions: { type: Type.ARRAY, items: { type: Type.STRING } },
-                confidenceScore: { type: Type.NUMBER },
-              },
-              required: [
-                "identifiedSpecies", "estimatedBreed", "appearanceDescription",
-                "apparentInjuries", "urgencyLevel", "urgencyReason",
-                "rescueEquipment", "firstAidAdvice", "handlingPrecautions",
-              ],
-            },
-          },
-        });
+          required: [
+            "identifiedSpecies", "estimatedBreed", "appearanceDescription",
+            "apparentInjuries", "urgencyLevel", "urgencyReason",
+            "rescueEquipment", "firstAidAdvice", "handlingPrecautions",
+          ],
+        },
+      },
+    });
 
-        console.log("[Gemini Debug] promptFeedback:", JSON.stringify((response as any)?.promptFeedback));
-        console.log("[Gemini Debug] candidates length:", (response as any)?.candidates?.length ?? 0);
-
-        const rawText = response.text;
-        if (rawText) {
-          const parsed = JSON.parse(rawText);
-          analysisResult = {
-            ...parsed,
-            urgencyLevel: (["P0", "P1", "P2"].includes(parsed.urgencyLevel) ? parsed.urgencyLevel : "P1") as any,
-            confidenceScore: parsed.confidenceScore || 0.92,
-            analyzedAt: new Date().toISOString(),
-          };
-        } else {
-          console.warn("[Gemini Debug] response.text is empty.");
-        }
-      } catch (geminiError) {
-        console.warn("Gemini API call failed or timed out:", (geminiError as Error).message);
-      }
-    } else {
-      console.error("[Gemini] No API key available — skipping Gemini call");
+    const rawText = response.text;
+    if (!rawText) {
+      console.warn("[Gemini] response.text is empty.");
+      return null;
     }
 
-    if (!analysisResult) {
-      res.json({ noResponse: true, message: "Gemini 沒有回應", analysisResult: null });
+    // 唔直接信 AI 輸出：逐個欄位檢查型別同長度先寫入資料庫
+    const p = JSON.parse(rawText);
+    const conf = Number(p.confidenceScore);
+    return {
+      identifiedSpecies: cleanStr(p.identifiedSpecies, 100),
+      estimatedBreed: cleanStr(p.estimatedBreed, 100),
+      appearanceDescription: cleanStr(p.appearanceDescription, 500),
+      apparentInjuries: cleanList(p.apparentInjuries),
+      urgencyLevel: ["P0", "P1", "P2"].includes(p.urgencyLevel) ? p.urgencyLevel : "P1",
+      urgencyReason: cleanStr(p.urgencyReason, 500),
+      rescueEquipment: cleanList(p.rescueEquipment),
+      firstAidAdvice: cleanList(p.firstAidAdvice),
+      handlingPrecautions: cleanList(p.handlingPrecautions),
+      confidenceScore: Number.isFinite(conf) ? Math.min(0.99, Math.max(0, conf)) : 0.8,
+      analyzedAt: new Date().toISOString(),
+    };
+  } catch (err) {
+    console.warn("Gemini API call failed:", (err as Error).message);
+    return null;
+  }
+}
+
+app.post("/api/cases/:caseId/analyze", aiRateLimitMiddleware, async (req: Request, res: Response) => {
+  const caseId = String(req.params.caseId ?? "");
+  if (!CASE_ID_RE.test(caseId)) {
+    res.status(400).json({ error: "案件編號格式不正確" });
+    return;
+  }
+  const bucket = getAdminBucket();
+  if (!bucket) {
+    res.status(503).json({ error: "相片儲存服務未設定" });
+    return;
+  }
+
+  try {
+    const caseRef = getAdminDb().collection("case").doc(caseId);
+    const snap = await caseRef.get();
+    if (!snap.exists) {
+      res.status(404).json({ error: "找不到案件" });
+      return;
+    }
+    const data = snap.data();
+    if (!isFreshCase(data) || data?.aiAnalysis || !(await claimOnce("analyze", caseId))) {
+      res.status(409).json({ error: "此案件已分析或已超過分析時限" });
       return;
     }
 
-    res.json(analysisResult);
+    // 超出每日總額度：唔阻止報案，案件維持 P1
+    if (!consumeDailyAiQuota()) {
+      console.warn(`[Gemini] 已達每日上限 ${AI_DAILY_LIMIT}，跳過 AI 分析`);
+      res.json({ noResponse: true });
+      return;
+    }
+
+    // 由 Storage 讀相片，唔接受前端直接傳圖
+    const file = bucket.file(`animal-reports/${caseId}.jpg`);
+    const [exists] = await file.exists();
+    if (!exists) {
+      res.status(404).json({ error: "找不到案件相片" });
+      return;
+    }
+    const [meta] = await file.getMetadata();
+    if (meta.contentType !== "image/jpeg" || Number(meta.size) >= 5 * 1024 * 1024) {
+      res.status(400).json({ error: "案件相片格式不正確" });
+      return;
+    }
+    const [buffer] = await file.download();
+
+    const lang = resolveLang(req, req.body?.lang);
+    const result = await runGeminiAnalysis(buffer.toString("base64"), data?.animalType, data?.description, lang);
+    if (!result) {
+      res.json({ noResponse: true });
+      return;
+    }
+
+    await caseRef.update({
+      aiAnalysis: result,
+      geminiResponse: result,
+      urgency: result.urgencyLevel,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    res.json({ analysis: result, urgency: result.urgencyLevel });
   } catch (err) {
-    console.error("AI Analysis route error:", (err as Error).message);
-    res.status(500).json({ error: "AI 分析失敗，請稍後再試" });
+    console.error("[Analyze] error:", (err as Error).message);
+    res.status(500).json({ error: "AI 分析失敗" });
   }
 });
 
-// ---------- 確認信（目前模擬）----------
+// ---------- 確認信（目前模擬；電郵由 server 自己讀，唔信前端）----------
 
-const CASE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 app.post("/api/cases/send-confirmation-email", emailIpRateLimitMiddleware, async (req: Request, res: Response) => {
+  const caseId = req.body?.caseId;
+  if (typeof caseId !== "string" || !CASE_ID_RE.test(caseId)) {
+    res.status(400).json({ error: "案件編號格式不正確" });
+    return;
+  }
+
   try {
-    const { caseId, reporterEmail, reporterName, animalType, urgency, location } = req.body ?? {};
+    const caseRef = getAdminDb().collection("case").doc(caseId);
+    const [caseSnap, contactSnap] = await Promise.all([
+      caseRef.get(),
+      caseRef.collection("private").doc("contact").get(),
+    ]);
+    if (!caseSnap.exists || !contactSnap.exists) {
+      res.status(404).json({ error: "找不到案件" });
+      return;
+    }
+    if (!isFreshCase(caseSnap.data())) {
+      res.status(409).json({ error: "只可以喺通報後 15 分鐘內寄出確認信" });
+      return;
+    }
 
-    if (typeof caseId !== "string" || typeof reporterEmail !== "string" || !caseId || !reporterEmail) {
-      res.status(400).json({ error: "缺少 caseId 或 reporterEmail 參數" });
+    const email = cleanStr(contactSnap.data()?.reporterEmail, 254);
+    if (!EMAIL_RE.test(email)) {
+      res.status(400).json({ error: "此案件冇有效電郵" });
       return;
     }
-    if (!CASE_ID_RE.test(caseId)) {
-      res.status(400).json({ error: "案件編號格式不正確" });
-      return;
-    }
-    if (reporterEmail.length > 254 || !EMAIL_RE.test(reporterEmail)) {
-      res.status(400).json({ error: "電子郵件格式不正確" });
-      return;
-    }
-
-    const { allowed } = await rateLimiter.isAllowed(`email_limit_${reporterEmail.toLowerCase()}`, 5, 300);
-    if (!allowed) {
-      res.status(429).json({ error: "該電子郵件發信頻率過高，請稍後再試" });
+    if (!(await claimOnce("email", caseId))) {
+      res.status(409).json({ error: "確認信已寄出" });
       return;
     }
 
@@ -835,57 +911,137 @@ app.post("/api/cases/send-confirmation-email", emailIpRateLimitMiddleware, async
     const baseUrl = (process.env.PUBLIC_BASE_URL || fallbackBase).replace(/\/$/, "");
     const trackingUrl = `${baseUrl}/?caseId=${encodeURIComponent(caseId)}`;
 
-    const emailReceipt = {
-      messageId: `MAIL-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
-      caseId,
-      recipient: reporterEmail,
-      recipientName: typeof reporterName === "string" && reporterName ? reporterName.slice(0, 50) : "熱心市民",
-      subject: `【PawPulse 救援通報確認】案件編號 #${caseId} 已立案`,
-      urgency,
-      animalType,
-      locationAddress: typeof location?.address === "string" ? location.address.slice(0, 200) : "通報指定地點",
-      trackingUrl,
-      sentAt: new Date().toISOString(),
-      status: "simulated",
-    };
-
-    console.log(`[EMAIL DISPATCH - SIMULATED] Case ${caseId} → ${maskEmail(reporterEmail)}`);
-    res.json({
-      success: true,
-      simulated: true,
-      message: "目前為測試模式，尚未真正發送電子郵件。",
-      emailReceipt,
-    });
+    // TODO：將來喺呢度接真正嘅發信服務
+    console.log(`[EMAIL DISPATCH - SIMULATED] Case ${caseId} → ${maskEmail(email)} | ${trackingUrl}`);
+    res.json({ success: true, simulated: true, message: "目前為測試模式，尚未真正發送電子郵件。" });
   } catch (err) {
     console.error("Email notification error:", (err as Error).message);
     res.status(500).json({ error: "發送確認信失敗" });
   }
 });
 
-app.post("/api/ngo/notify", (req: Request, res: Response) => {
-  const { reportId, ngoId, ngoName, urgency } = req.body ?? {};
+// ---------- 通知 NGO（目前模擬）----------
+// admin：任何案件都可以派送；報案人（未登入）：只限建立後 15 分鐘內、每宗案件一次
 
-  if (!reportId || !ngoId) {
-    res.status(400).json({ error: "缺少 reportId 或 ngoId" });
+app.post("/api/ngo/notify", dispatchRateLimitMiddleware, async (req: Request, res: Response) => {
+  const { reportId, ngoId } = req.body ?? {};
+  if (typeof reportId !== "string" || !CASE_ID_RE.test(reportId) ||
+      typeof ngoId !== "string" || !CASE_ID_RE.test(ngoId)) {
+    res.status(400).json({ error: "缺少或無效的 reportId / ngoId" });
     return;
   }
 
-  res.json({
-    simulated: true,
-    receiptId: `DISPATCH-${Date.now().toString(36).toUpperCase()}`,
-    reportId,
-    ngoId,
-    ngoName,
-    dispatchedAt: new Date().toISOString(),
-    status: "simulated",
-    estimatedVolunteerArrivalMins: urgency === "P0" ? 15 : 30,
-    notice: "目前為測試模式，尚未真正推送至 NGO 系統。",
-  });
+  try {
+    const db = getAdminDb();
+    const caseRef = db.collection("case").doc(reportId);
+    const [adminUid, caseSnap, ngoSnap, contactSnap] = await Promise.all([
+      getAdminUid(req),
+      caseRef.get(),
+      db.collection("ngodatail").doc(ngoId).get(),
+      caseRef.collection("private").doc("contact").get(),
+    ]);
+    if (!caseSnap.exists || !ngoSnap.exists) {
+      res.status(404).json({ error: "找不到案件或機構" });
+      return;
+    }
+
+    const caseData = caseSnap.data() ?? {};
+    if (!adminUid) {
+      if (!isFreshCase(caseData)) {
+        res.status(403).json({ error: "只有管理員可以派送此案件" });
+        return;
+      }
+      if (caseData.dispatchedToNGO || !(await claimOnce("dispatch", reportId))) {
+        res.status(409).json({ error: "此案件已通知過救援機構" });
+        return;
+      }
+    }
+
+    const ngo = ngoSnap.data() ?? {};
+    const contact = contactSnap.data() ?? {};
+    const dispatchedAt = new Date().toISOString();
+    const dispatchedToNGO = {
+      ngoId,
+      ngoName: cleanStr(ngo.name, 200), // 機構名由資料庫讀，唔信前端
+      dispatchedAt,
+      status: "sent",
+      simulated: true,
+    };
+
+    await caseRef.update({
+      dispatchedToNGO,
+      ...(adminUid && caseData.status === "pending" ? { status: "in_progress" } : {}),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    // TODO：將來喺呢度接真正推送，報案人電話直接用 contact.reporterPhone
+    console.log(
+      `[NGO DISPATCH - SIMULATED] case ${reportId} → ${ngoId} (${adminUid ? "admin" : "reporter"}), 有電話: ${!!contact.reporterPhone}`
+    );
+    res.json({
+      simulated: true,
+      receiptId: `DISPATCH-${Date.now().toString(36).toUpperCase()}`,
+      dispatchedAt,
+      dispatchedToNGO,
+      notice: "目前為測試模式，尚未真正推送至 NGO 系統。",
+    });
+  } catch (err) {
+    console.error("[NGO notify] error:", (err as Error).message);
+    res.status(500).json({ error: "通知 NGO 失敗" });
+  }
+});
+
+// ---------- 刪除案件（admin；案件、聯絡資料、相片一齊刪）----------
+
+app.delete("/api/admin/cases/:caseId", adminRateLimitMiddleware, async (req: Request, res: Response) => {
+  const caseId = String(req.params.caseId ?? "");
+  if (!CASE_ID_RE.test(caseId)) {
+    res.status(400).json({ error: "案件編號格式不正確" });
+    return;
+  }
+  if (!(await getAdminUid(req))) {
+    res.status(403).json({ error: "只有管理員可以刪除案件" });
+    return;
+  }
+
+  try {
+    const db = getAdminDb();
+    const caseRef = db.collection("case").doc(caseId);
+    const snap = await caseRef.get();
+    const rawPath = snap.exists ? snap.data()?.storagePath : undefined;
+    // 冇記錄或者格式唔啱，就用預設檔名，確保相片唔會遺留喺 Storage
+    const storagePath =
+      typeof rawPath === "string" && STORAGE_PATH_RE.test(rawPath) ? rawPath : `animal-reports/${caseId}.jpg`;
+
+    const batch = db.batch();
+    batch.delete(caseRef.collection("private").doc("contact"));
+    batch.delete(caseRef);
+    for (const kind of ["analyze", "email", "dispatch"]) {
+      batch.delete(db.collection("serverLocks").doc(`${kind}_${caseId}`));
+    }
+    await batch.commit();
+
+    const bucket = getAdminBucket();
+    if (bucket) {
+      await bucket.file(storagePath).delete({ ignoreNotFound: true });
+    }
+
+    console.log(`[Admin] Deleted case ${caseId} (contact + photo)`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[Admin delete] error:", (err as Error).message);
+    res.status(500).json({ error: "刪除失敗" });
+  }
 });
 
 // ---------- 啟動 ----------
 
 async function startServer() {
+  // 未定義嘅 API 路徑一律回 JSON 404，唔好交俾前端 SPA 回傳 HTML
+  app.use("/api", (_req: Request, res: Response) => {
+    res.status(404).json({ error: "API 路徑不存在" });
+  });
+
   if (!IS_PROD) {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
@@ -896,14 +1052,20 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (_req: Request, res: Response) => {
+    // SPA fallback（Express 4 / 5 都適用）
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      if (req.method !== "GET") {
+        next();
+        return;
+      }
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`PawPulse server listening on http://0.0.0.0:${PORT}`);
-    if (!STORAGE_BUCKET) console.warn("[Upload] FIREBASE_STORAGE_BUCKET 未設定（本機會改存 public/uploads）");
+    if (!STORAGE_BUCKET) console.warn("[Firebase] FIREBASE_STORAGE_BUCKET 未設定：AI 分析同後備上傳會失敗");
+    if (!FIRESTORE_DATABASE_ID) console.warn("[Firebase] FIRESTORE_DATABASE_ID 未設定：會連去 (default) database");
   });
 }
 

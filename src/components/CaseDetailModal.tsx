@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { StrayReport, CaseStatus } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { StrayReport, CaseStatus, NGOOrganization } from '../types';
 import { AIAnalysisCard } from './AIAnalysisCard';
 import { NGOMatchFeedback } from './NGOMatchFeedback';
 import { getGoogleMapsDirectionsUrl } from '../utils/location';
 import { useAuth } from '../contexts/AuthContext';
-import { fetchCaseContact, ReporterContactInfo } from '../services/caseService';
+import { fetchCaseContact, ReporterContactInfo, rankFirestoreNGOs } from '../services/caseService';
 import {
   X,
   MapPin,
@@ -22,14 +22,16 @@ import {
 
 interface CaseDetailModalProps {
   report: StrayReport;
+  ngos: NGOOrganization[];
   onClose: () => void;
   onUpdateStatus?: (reportId: string, newStatus: CaseStatus) => void;
-  onDispatchToNGO: (ngoId: string, ngoName: string) => Promise<void>;
+  onDispatchToNGO?: (ngoId: string, ngoName: string) => Promise<void>;
   onDeleteCase?: (reportId: string) => void;
 }
 
 export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
   report,
+  ngos,
   onClose,
   onUpdateStatus,
   onDispatchToNGO,
@@ -67,6 +69,11 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
     reporterPhone: contactInfo?.reporterPhone || report.reporterPhone,
     reporterEmail: contactInfo?.reporterEmail || report.reporterEmail,
   };
+
+  const liveMatchedNGOs = useMemo(
+  () => rankFirestoreNGOs(ngos, report.location.lat, report.location.lng, report.animalType, report.urgency).slice(0, 3),
+  [ngos, report.location.lat, report.location.lng, report.animalType, report.urgency]
+);
 
   const statusOptions: { status: CaseStatus; label: string; color: string }[] = [
     { status: 'pending', label: '待處理', color: 'bg-stone-100 text-stone-700' },
@@ -192,7 +199,7 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                       {contactInfo?.reporterPhone && contactInfo.reporterPhone !== '未填寫' && contactInfo.reporterPhone !== '未提供 (匿名)' && (
                         <div className="flex items-center gap-1.5 text-stone-600">
                           <Phone className="w-3.5 h-3.5 text-stone-400" />
-                          <a href={`tel:${contactInfo.reporterPhone}`} className="text-blue-600 font-bold hover:underline">
+                          <a href={`tel:${contactInfo.reporterPhone.replace(/[^\d+]/g, '')}`} className="text-blue-600 font-bold hover:underline">
                             {contactInfo.reporterPhone}
                           </a>
                         </div>
@@ -285,7 +292,7 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                   : 'border-transparent text-stone-500 hover:text-stone-800'
               }`}
             >
-              🏥 媒合 NGO 與通報回饋 ({report.matchedNGOs?.length || 0})
+              🏥 媒合 NGO 與通報回饋 ({liveMatchedNGOs.length})
             </button>
           </div>
 
@@ -306,7 +313,7 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
             <div>
               <NGOMatchFeedback
                 report={enrichedReport}
-                matchedNGOs={report.matchedNGOs || []}
+                matchedNGOs={liveMatchedNGOs}
                 onDispatchToNGO={onDispatchToNGO}
               />
             </div>

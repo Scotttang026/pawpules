@@ -10,4 +10,4 @@ coverage/
 .vercel/
 *.local
 .vite/
-server-dist
+server-dist/

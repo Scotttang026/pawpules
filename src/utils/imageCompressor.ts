@@ -126,10 +126,12 @@ export async function uploadAnimalPhoto(
     throw new Error('照片資料為空，請重新選擇照片。');
   }
 
-  const timestamp = Date.now();
-  const safeCaseId =
-    (caseId || `PW-${timestamp}`).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80) || `PW-${timestamp}`;
-  const storagePath = `animal-reports/${safeCaseId}_${timestamp}.jpg`;
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(caseId)) {
+    throw new Error('案件編號格式不正確，請重新提交。');
+  }
+  const safeCaseId = caseId;
+  // 檔名必須等於案件編號，firestore.rules 會核對相片屬於呢宗案件
+  const storagePath = `animal-reports/${safeCaseId}.jpg`;
 
   // Attempt 1: Direct Firebase Cloud Storage upload
   try {
