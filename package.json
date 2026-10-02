@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "pawpulse",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -13,6 +13,7 @@
     "@google/genai": "^2.25.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "firebase-admin": "^14.5.0",
     "heic2any": "^0.0.4"
   },
   "devDependencies": {

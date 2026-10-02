@@ -107,9 +107,11 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     address: PRESET_LOCATIONS[0].sampleAddress,
     district: PRESET_LOCATIONS[0].district,
   });
-  const [manualAddressInput, setManualAddressInput] = useState(PRESET_LOCATIONS[0].sampleAddress);
+  const [manualAddressInput, setManualAddressInput] = useState('');
   const [isGeolocating, setIsGeolocating] = useState(false);
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
+  // 市民必須主動確認位置（GPS／揀建議地址／定位成功）先可以送出，避免用咗預設座標
+  const [locationConfirmed, setLocationConfirmed] = useState(false);
 
   const [statusMessage, setStatusMessage] = useState('');
 
@@ -144,10 +146,10 @@ export const ReportForm: React.FC<ReportFormProps> = ({
       async (pos) => {
         const { latitude, longitude } = pos.coords;
         try {
-          // 經伺服器 /api/reverse-geocode（Google 優先，fallback Nominatim），呢個 function 唔會 throw
           const { address, district } = await reverseGeocodeCoords(latitude, longitude);
-          setLocation({ lat: latitude, lng: longitude, address, district: district || '現場位置' });
+          setLocation({ lat: latitude, lng: longitude, address, district: district || '待確認地區' });
           setManualAddressInput(address);
+          setLocationConfirmed(true);
           setStatusMessage('✓ GPS 定位成功');
         } finally {
           setIsGeolocating(false);
@@ -165,40 +167,38 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     );
   };
 
-  const handleSearchManualAddress = async () => {
-    if (!manualAddressInput.trim()) return;
+    const handleSearchManualAddress = async () => {
+    const query = manualAddressInput.trim();
+    if (!query) return;
 
     setIsSearchingAddress(true);
     setStatusMessage('正在搜尋地址座標...');
-
-    const result = await geocodeAddressQuery(manualAddressInput.trim());
-    console.log("[Google Map Debug] Address result:", 
-        JSON.stringify(result, null, 2));
-    if (result) {
-      setLocation({
-        lat: result.lat,
-        lng: result.lng,
-        address: result.address,
-        district: '定位搜尋點',
-      });
-      setStatusMessage('✓ 已找到地址位置');
-    } else {
-      setStatusMessage('未能解析精確經緯度，已直接保存地址名稱');
-      setLocation((prev) => ({
-        ...prev,
-        address: manualAddressInput.trim(),
-      }));
+    try {
+      const result = await geocodeAddressQuery(query);
+      if (result) {
+        setLocation({
+          lat: result.lat,
+          lng: result.lng,
+          address: result.address,
+          district: result.district || '待確認地區',
+        });
+        setLocationConfirmed(true);
+        setStatusMessage('✓ 已找到地址位置');
+      } else {
+        setStatusMessage('搵唔到呢個地址嘅位置，請喺建議清單揀一個地址，或者撳「取得 GPS 定位」。');
+      }
+    } finally {
+      setIsSearchingAddress(false);
     }
-    setIsSearchingAddress(false);
   };
     
   // 市民喺自動完成清單揀咗地址
   const handleSelectPlace = (p: ResolvedAddress) => {
-    setLocation({ lat: p.lat, lng: p.lng, address: p.address, district: '定位搜尋點' });
+    setLocation({ lat: p.lat, lng: p.lng, address: p.address, district: p.district || '待確認地區' });
     setManualAddressInput(p.address);
+    setLocationConfirmed(true);
     setStatusMessage('✓ 已找到地址位置');
   };
-
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -211,6 +211,11 @@ export const ReportForm: React.FC<ReportFormProps> = ({
 
     if (!description.trim()) {
       alert('請填寫現場動物狀況描述');
+      return;
+    }
+
+    if (!locationConfirmed) {
+      alert('請先確認發現位置：撳「取得 GPS 定位」，或者喺地址欄揀一個建議地址。');
       return;
     }
 
@@ -509,14 +514,14 @@ export const ReportForm: React.FC<ReportFormProps> = ({
             </button>
           </div>
           <div className="flex gap-2">
-                        <div className="flex-1">
+            <div className="flex-1">
               <AddressAutocomplete
                 value={manualAddressInput}
                 onChange={setManualAddressInput}
                 onSelect={handleSelectPlace}
                 onEnter={handleSearchManualAddress}
-                bias={{ lat: location.lat, lng: location.lng }}
-                placeholder="輸入地址或地標，例如：旺角朗豪坊、沙田城門河畔單車徑"
+                bias={locationConfirmed ? { lat: location.lat, lng: location.lng } : null}
+                placeholder="輸入地址或地標，例如：旺角朗豪坊、Shibuya Station、Times Square"
               />
             </div>
             <button
@@ -529,20 +534,26 @@ export const ReportForm: React.FC<ReportFormProps> = ({
               定位
             </button>
           </div>
-
-          <div className="p-3 bg-white border border-stone-200 rounded-xl flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2 truncate">
-              <MapPin className="w-4 h-4 text-stone-500 shrink-0" />
-              <span className="text-stone-800 truncate">
-                已設定座標位置：<strong>{location.address}</strong>
+          {locationConfirmed ? (
+            <div className="p-3 bg-white border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2 truncate">
+                <MapPin className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="text-stone-800 truncate">
+                  已設定位置：<strong>{location.address}</strong>
+                  {location.district && <span className="text-stone-500">（{location.district}）</span>}
+                </span>
+              </div>
+              <span className="text-2xs text-stone-500 shrink-0 ml-2 font-mono">
+                ({location.lat.toFixed(4)}, {location.lng.toFixed(4)})
               </span>
             </div>
-            <span className="text-2xs text-stone-500 shrink-0 ml-2 font-mono">
-              ({location.lat.toFixed(4)}, {location.lng.toFixed(4)})
-            </span>
-          </div>
+          ) : (
+            <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-center gap-2 text-xs text-amber-900">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>尚未確認位置：請撳「取得 GPS 定位」，或者喺上面地址欄輸入並揀一個建議地址。</span>
+            </div>
+          )}
         </div>
-
         {/* Section 4: Notes and Reporter details */}
         <div className="rounded-2xl border-2 border-stone-200 bg-stone-50/60 p-4 sm:p-5 shadow-xs space-y-3.5">
           <div className="flex items-center justify-between border-b border-stone-200 pb-2.5">

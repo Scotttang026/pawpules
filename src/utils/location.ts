@@ -1,3 +1,5 @@
+import { getBrowserLanguage } from './locale';
+
 export interface PresetLocation {
   name: string;
   district: string;
@@ -6,6 +8,7 @@ export interface PresetLocation {
   sampleAddress: string;
 }
 
+// 只作表單初始值（未確認前唔會被送出），唔再代表服務範圍
 export const PRESET_LOCATIONS: PresetLocation[] = [
   { name: '旺角 (亞皆老街)', district: '油尖旺區', lat: 22.3193, lng: 114.1694, sampleAddress: '九龍旺角亞皆老街45號後巷' },
   { name: '沙田 (城門河單車徑)', district: '沙田區', lat: 22.3857, lng: 114.1915, sampleAddress: '新界沙田大涌橋路近城門河畔' },
@@ -34,7 +37,7 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
   }
 }
 
-// Open Google Maps navigation link（純深層連結，唔涉及 API 呼叫，冇需要金鑰）
+// Google Maps 導航深層連結（全球通用，唔涉及 API 呼叫）
 export function getGoogleMapsDirectionsUrl(destLat: number, destLng: number, originLat?: number, originLng?: number): string {
   if (!isValidCoordinate(destLat, destLng)) {
     return 'https://www.google.com/maps';
@@ -53,7 +56,8 @@ export function getGoogleMapsDirectionsUrl(destLat: number, destLng: number, ori
 }
 
 /**
- * 呼叫伺服器端 /api/reverse-geocode（Google 優先，fallback Nominatim）。
+ * 座標 → 地址 + 區名（跟瀏覽器語言）。經伺服器 /api/reverse-geocode（Google 優先，fallback Nominatim）。
+ * 呢個 function 唔會 throw。
  */
 export async function reverseGeocodeCoords(lat: number, lng: number): Promise<{ address: string; district?: string }> {
   if (!isValidCoordinate(lat, lng)) {
@@ -61,11 +65,12 @@ export async function reverseGeocodeCoords(lat: number, lng: number): Promise<{ 
   }
 
   try {
-    const res = await fetchWithTimeout(`${API_BASE}/api/reverse-geocode?lat=${lat}&lng=${lng}`, {}, 8000);
+    const params = new URLSearchParams({ lat: String(lat), lng: String(lng), lang: getBrowserLanguage() });
+    const res = await fetchWithTimeout(`${API_BASE}/api/reverse-geocode?${params}`, {}, 8000);
     if (res.ok) {
       const data = await res.json();
       if (data && typeof data.address === 'string') {
-        return { address: data.address, district: data.district || '市區' };
+        return { address: data.address, district: data.district || '待確認地區' };
       }
     }
   } catch (err) {
@@ -79,18 +84,26 @@ export async function reverseGeocodeCoords(lat: number, lng: number): Promise<{ 
 }
 
 /**
- * 呼叫伺服器端 /api/geocode。
+ * 地址文字 → 座標 + 區名（跟瀏覽器語言）。經伺服器 /api/geocode。
  */
-export async function geocodeAddressQuery(query: string): Promise<{ lat: number; lng: number; address: string } | null> {
+export async function geocodeAddressQuery(
+  query: string
+): Promise<{ lat: number; lng: number; address: string; district?: string } | null> {
   const cleanQuery = query.trim();
   if (!cleanQuery) return null;
 
   try {
-    const res = await fetchWithTimeout(`${API_BASE}/api/geocode?address=${encodeURIComponent(cleanQuery)}`, {}, 8000);
+    const params = new URLSearchParams({ address: cleanQuery, lang: getBrowserLanguage() });
+    const res = await fetchWithTimeout(`${API_BASE}/api/geocode?${params}`, {}, 8000);
     if (res.ok) {
       const data = await res.json();
       if (data && isValidCoordinate(data.lat, data.lng)) {
-        return { lat: data.lat, lng: data.lng, address: data.formattedAddress || data.address || cleanQuery };
+        return {
+          lat: data.lat,
+          lng: data.lng,
+          address: data.formattedAddress || data.address || cleanQuery,
+          district: typeof data.district === 'string' ? data.district : undefined,
+        };
       }
     }
   } catch (err) {
@@ -99,7 +112,7 @@ export async function geocodeAddressQuery(query: string): Promise<{ lat: number;
   return null;
 }
 
-// Haversine distance calculator between coordinates in kilometers
+// Haversine 距離（公里）
 export function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   if (!isValidCoordinate(lat1, lon1) || !isValidCoordinate(lat2, lon2)) {
     return Number.POSITIVE_INFINITY;
