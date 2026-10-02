@@ -865,7 +865,7 @@ app.post("/api/cases/:caseId/analyze", aiRateLimitMiddleware, async (req: Reques
     });
     res.json({ analysis: result, urgency: result.urgencyLevel });
   } catch (err) {
-    console.error("[Analyze] error:", (err as Error).message);
+    console.error("[Analyze] error:", (err as any)?.code, (err as Error).message);
     res.status(500).json({ error: "AI 分析失敗" });
   }
 });
@@ -915,7 +915,7 @@ app.post("/api/cases/send-confirmation-email", emailIpRateLimitMiddleware, async
     console.log(`[EMAIL DISPATCH - SIMULATED] Case ${caseId} → ${maskEmail(email)} | ${trackingUrl}`);
     res.json({ success: true, simulated: true, message: "目前為測試模式，尚未真正發送電子郵件。" });
   } catch (err) {
-    console.error("Email notification error:", (err as Error).message);
+    console.error("Email notification error:", (err as any)?.code, (err as Error).message);
     res.status(500).json({ error: "發送確認信失敗" });
   }
 });
