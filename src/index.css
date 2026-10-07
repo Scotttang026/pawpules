@@ -1,12 +1,32 @@
 @import "tailwindcss";
 
 @theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "PingFang HK", "Noto Sans HK", "Microsoft JhengHei", sans-serif;
+
   --text-2xs: 0.625rem;
   --text-2xs--line-height: 0.875rem;
   --text-3xs: 0.5625rem;
   --text-3xs--line-height: 0.75rem;
+
+  /*
+   * 品牌主色（brand-*）：暖色系，橙色做 icon／重點色。之後要換主題色只需要改呢度。
+   * 50–600 係橙色（淺底、邊框、icon、按鈕）；700–950 刻意設成暖黑，
+   * 因為好多地方用 text-brand-800/900 做字色，咁就可以保持文字係黑色。
+   */
+  --color-brand-50: var(--color-orange-50);
+  --color-brand-100: var(--color-orange-100);
+  --color-brand-200: var(--color-orange-200);
+  --color-brand-300: var(--color-orange-300);
+  --color-brand-400: var(--color-orange-400);
+  --color-brand-500: var(--color-orange-500);
+  --color-brand-600: var(--color-orange-600);
+  --color-brand-700: var(--color-stone-800);
+  --color-brand-800: var(--color-stone-800);
+  --color-brand-900: var(--color-stone-900);
+  --color-brand-950: var(--color-stone-950);
 }
 
 body {
-  background-color: rgba(255, 247, 237, 0.8);
+  background-color: var(--color-stone-100);
+  -webkit-font-smoothing: antialiased;
 }

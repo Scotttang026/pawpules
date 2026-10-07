@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { StrayReport, CaseStatus, NGOOrganization } from './types';
-import { Navbar } from './components/Navbar';
+import { Sidebar, AppTab } from './components/Sidebar';
 import { ReportForm } from './components/ReportForm';
 import { AIAnalysisCard } from './components/AIAnalysisCard';
 import { NGOMatchFeedback } from './components/NGOMatchFeedback';
@@ -35,6 +35,8 @@ import {
   PhoneCall,
   Mail,
   AlertTriangle,
+  Plus,
+  X,
 } from 'lucide-react';
 
 const API_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '').replace(/\/$/, '');
@@ -44,7 +46,7 @@ function AppContent() {
   const emergency = getEmergencyContact();
   const [reports, setReports] = useState<StrayReport[]>([]);
   const [ngos, setNgos] = useState<NGOOrganization[]>([]);
-  const [currentTab, setCurrentTab] = useState<'report' | 'map' | 'cases' | 'ngos' | 'admin'>('report');
+  const [currentTab, setCurrentTab] = useState<AppTab>('report');
   const [selectedReportForModal, setSelectedReportForModal] = useState<StrayReport | null>(null);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number } | undefined>(undefined);
   const [showGuideModal, setShowGuideModal] = useState(false);
@@ -277,178 +279,184 @@ function AppContent() {
     setCurrentTab('map');
   };
 
+  const pageMeta: Record<AppTab, { title: string; subtitle: string }> = {
+    report: { title: '我要通報', subtitle: '影相上載，AI 即時評估傷勢並配對附近 NGO' },
+    map: { title: '救援地圖', subtitle: '即時顯示待救援個案（P0 危急／P1 醫療／P2 穩定）同 NGO 位置' },
+    cases: { title: '個案動態', subtitle: `共 ${reports.length} 宗 · 實時同步` },
+    ngos: { title: '合作機構', subtitle: `${ngos.length} 間救助機構及熱線` },
+    admin: { title: '後台管理', subtitle: '個案調度、NGO 容量同系統紀錄' },
+  };
+  const meta = pageMeta[currentTab];
+
   return (
-    <div className="min-h-screen bg-orange-50/80 text-stone-900 flex flex-col font-sans">
-      <Navbar
+    <div className="min-h-screen bg-stone-100 text-stone-900 font-sans">
+      <Sidebar
         currentTab={currentTab}
         onSelectTab={(tab) => setCurrentTab(tab)}
         onOpenGuide={() => setShowGuideModal(true)}
         urgentCount={urgentCount}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        {submitErrorBanner && (
-          <div className="mb-6 p-4 rounded-2xl bg-rose-600 text-white shadow-md flex items-center justify-between gap-3 text-xs sm:text-sm">
-            <div className="flex items-center gap-2.5">
-              <AlertTriangle className="w-5 h-5 shrink-0" />
-              <span>{submitErrorBanner}</span>
-            </div>
-            <button onClick={() => setSubmitErrorBanner(null)} className="text-white font-bold px-2 py-1 cursor-pointer">✕</button>
-          </div>
-        )}
-
-        {emailConfirmationBanner && (
-          <div className="mb-6 p-4 rounded-2xl bg-emerald-600 text-white shadow-md flex items-center justify-between gap-3 text-xs sm:text-sm">
-            <div className="flex items-center gap-2.5">
-              <Mail className="w-5 h-5 text-emerald-200 shrink-0" />
-              <span>
-                <strong>通報立案成功！</strong> 個案編號 <code>#{emailConfirmationBanner.caseId}</code> 已同步寄發確認信與進度追蹤連結至 <strong>{emailConfirmationBanner.email}</strong>。
-              </span>
-            </div>
-            <button onClick={() => setEmailConfirmationBanner(null)} className="text-white hover:text-emerald-200 font-bold px-2 py-1 cursor-pointer">✕</button>
-          </div>
-        )}
-
-        {urgentCount > 0 && currentTab !== 'cases' && (
-          <div className="mb-6 p-3.5 px-4 rounded-2xl bg-rose-600 text-white shadow-md flex items-center justify-between gap-3 text-xs sm:text-sm">
-            <div className="flex items-center gap-2.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping" />
-              <span className="font-bold tracking-wide">
-                目前有 {urgentCount} 宗 P0 極度危急傷病動物通報，急需救助隊馳援！
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {emergency && (
-                <a href={telHref(emergency.phone)} className="hidden sm:inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-rose-800 hover:bg-rose-900 text-white font-bold text-xs">
-                  <PhoneCall className="w-3.5 h-3.5 text-rose-300" />
-                  {emergency.name}
-                </a>
-              )}
-              <button onClick={() => setCurrentTab('cases')} className="px-3 py-1 rounded-xl bg-white text-rose-700 font-bold hover:bg-rose-50 transition-colors shrink-0 text-xs cursor-pointer">
-                檢視危急個案 →
-              </button>
-            </div>
-          </div>
-        )}
-
-        {currentTab === 'report' && (
-          <div className="space-y-6">
-            {justSubmittedReport ? (
-              <div className="space-y-6" id="report-success-view">
-                <div className="bg-emerald-500/10 border border-emerald-300 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
-                      <CheckCircle2 className="w-7 h-7" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-base sm:text-lg text-emerald-950">
-                        通報成功並存入雲端！個案編號：{justSubmittedReport.id}
-                      </h3>
-                      <p className="text-xs text-emerald-900 mt-0.5">
-                        照片已妥善儲存至 Cloud Storage，Gemini 多模態 AI 已完成傷病評估，並已自動匹配鄰近合適 NGO 救助隊。
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    <button onClick={() => handleNavigateToMap(justSubmittedReport.location)} className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-stone-900 text-white hover:bg-stone-800 text-xs font-bold transition-colors shadow-xs cursor-pointer">
-                      <MapPin className="w-4 h-4 text-rose-400" />
-                      在地圖查看位置
-                    </button>
-                    <button onClick={() => setJustSubmittedReport(null)} className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-white border border-stone-300 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors shadow-2xs cursor-pointer">
-                      通報新個案
-                    </button>
-                  </div>
-                </div>
-
-                {justSubmittedReport.aiAnalysis ? (
-                  <AIAnalysisCard analysis={justSubmittedReport.aiAnalysis} />
-                ) : (
-                  <div className="bg-stone-50 border border-stone-200 rounded-3xl p-5 text-center text-stone-500 space-y-1">
-                    <p className="text-sm font-bold text-stone-700">Gemini 沒有回應</p>
-                    <p className="text-xs text-stone-400">未能取得 AI 傷病分析報告，個案已妥善存立並直接匹配周邊救助隊。</p>
-                  </div>
-                )}
-
-                <NGOMatchFeedback
-                  report={justSubmittedReport}
-                  matchedNGOs={justSubmittedReport.matchedNGOs || []}
-                  onDispatchToNGO={handleDispatchToNGO}
-                />
+      <div className="md:pl-20 md:py-3 md:pr-3 min-h-screen flex flex-col">
+        <div className="flex-1 flex flex-col bg-white md:rounded-2xl md:border md:border-stone-200 md:shadow-sm overflow-hidden">
+          {/* 頂部標題列 */}
+          <header className="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-stone-200">
+            <div className="px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <h1 className="text-lg font-semibold tracking-tight truncate">{meta.title}</h1>
+                <p className="text-xs text-stone-500 truncate">{meta.subtitle}</p>
               </div>
-            ) : (
-              <div className="max-w-3xl mx-auto">
-                <ReportForm ngos={ngos} onSubmitReport={handleCreateReport} />
+              <div className="flex items-center gap-2 shrink-0">
+                {urgentCount > 0 && currentTab !== 'cases' && (
+                  <button
+                    onClick={() => setCurrentTab('cases')}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-stone-200 text-xs font-medium hover:bg-stone-50 transition-colors cursor-pointer"
+                  >
+                    <span className="relative flex w-2 h-2">
+                      <span className="absolute inset-0 rounded-full bg-rose-500 animate-ping opacity-75" />
+                      <span className="relative w-2 h-2 rounded-full bg-rose-600" />
+                    </span>
+                    <span className="hidden sm:inline">{urgentCount} 宗 P0 危急</span>
+                    <span className="sm:hidden">{urgentCount}</span>
+                  </button>
+                )}
+                {emergency && (
+                  <a
+                    href={telHref(emergency.phone)}
+                    className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-stone-200 text-xs font-medium hover:bg-stone-50 transition-colors"
+                  >
+                    <PhoneCall className="w-3.5 h-3.5 text-brand-500" />
+                    {emergency.name}
+                  </a>
+                )}
+                {currentTab !== 'report' && currentTab !== 'admin' && (
+                  <button
+                    onClick={() => setCurrentTab('report')}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">新通報</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </header>
+
+          <main className="flex-1 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 pb-24 md:pb-8">
+            {submitErrorBanner && (
+              <div className="mb-6 p-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-900 flex items-start justify-between gap-3 text-sm">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 text-rose-600 shrink-0" />
+                  <span>{submitErrorBanner}</span>
+                </div>
+                <button onClick={() => setSubmitErrorBanner(null)} className="text-rose-400 hover:text-rose-700 cursor-pointer" aria-label="關閉">
+                  <X className="w-4 h-4" />
+                </button>
               </div>
             )}
-          </div>
-        )}
 
-        {currentTab === 'map' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-stone-900">流浪動物救援即時地圖 (Firestore 實時同步)</h2>
-                <p className="text-xs text-stone-500">即時標註待救援貓狗個案（紅：P0危急／橙：P1醫療／綠：P2穩定）與 NGO 庇護站位置</p>
+            {emailConfirmationBanner && (
+              <div className="mb-6 p-4 rounded-xl border border-stone-200 bg-stone-50 flex items-start justify-between gap-3 text-sm">
+                <div className="flex items-start gap-2.5">
+                  <Mail className="w-4 h-4 mt-0.5 text-brand-500 shrink-0" />
+                  <span className="text-stone-700">
+                    確認信已寄出：個案 <code className="font-mono text-stone-900">#{emailConfirmationBanner.caseId}</code> 嘅追蹤連結已寄去 <strong className="text-stone-900">{emailConfirmationBanner.email}</strong>。
+                  </span>
+                </div>
+                <button onClick={() => setEmailConfirmationBanner(null)} className="text-stone-400 hover:text-stone-700 cursor-pointer" aria-label="關閉">
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <button onClick={() => setCurrentTab('report')} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 text-white font-bold text-xs shadow-xs hover:bg-amber-600 transition-colors cursor-pointer">
-                + 即時通報新個案
-              </button>
-            </div>
-            <InteractiveMap
-              reports={reports}
-              ngos={ngos}
-              selectedReportId={selectedReportForModal?.id}
-              onSelectReport={(report) => setSelectedReportForModal(report)}
-              centerCoords={mapCenter}
-            />
-          </div>
-        )}
+            )}
 
-        {currentTab === 'cases' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-stone-900">通報個案動態與救援進度 ({reports.length} 宗 · 實時雲端共享)</h2>
-                <p className="text-xs text-stone-500">全體市民與救援機構共享動態牆，任何新通報與狀態變更將即時同步</p>
+            {currentTab === 'report' && (
+              <div className="space-y-6">
+                {justSubmittedReport ? (
+                  <div className="space-y-6" id="report-success-view">
+                    <div className="rounded-2xl border border-stone-200 p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-11 h-11 rounded-xl bg-brand-500 text-white flex items-center justify-center shrink-0">
+                          <CheckCircle2 className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-base">通報成功 · {justSubmittedReport.id}</h3>
+                          <p className="text-xs text-stone-500 mt-0.5">
+                            相片已儲存，AI 已完成傷勢評估，並配對咗附近合適嘅 NGO。
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <button onClick={() => handleNavigateToMap(justSubmittedReport.location)} className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-stone-900 text-white hover:bg-black text-xs font-medium transition-colors cursor-pointer">
+                          <MapPin className="w-4 h-4" />
+                          喺地圖睇位置
+                        </button>
+                        <button onClick={() => setJustSubmittedReport(null)} className="flex-1 sm:flex-initial px-4 py-2 rounded-lg border border-stone-200 hover:bg-stone-50 text-xs font-medium transition-colors cursor-pointer">
+                          通報新個案
+                        </button>
+                      </div>
+                    </div>
+
+                    {justSubmittedReport.aiAnalysis ? (
+                      <AIAnalysisCard analysis={justSubmittedReport.aiAnalysis} />
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-stone-300 p-5 text-center space-y-1">
+                        <p className="text-sm font-medium text-stone-700">Gemini 冇回應</p>
+                        <p className="text-xs text-stone-400">未能取得 AI 傷勢分析，個案已經儲存，並直接配對附近救助隊。</p>
+                      </div>
+                    )}
+
+                    <NGOMatchFeedback
+                      report={justSubmittedReport}
+                      matchedNGOs={justSubmittedReport.matchedNGOs || []}
+                      onDispatchToNGO={handleDispatchToNGO}
+                    />
+                  </div>
+                ) : (
+                  <div className="max-w-6xl mx-auto">
+                    <ReportForm ngos={ngos} onSubmitReport={handleCreateReport} />
+                  </div>
+                )}
               </div>
-              <button onClick={() => setCurrentTab('report')} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 text-white font-bold text-xs shadow-xs hover:bg-amber-600 transition-colors cursor-pointer">
-                + 我要通報
-              </button>
-            </div>
-            <CaseFeed reports={reports} onSelectReport={(report) => setSelectedReportForModal(report)} onNavigateToMap={handleNavigateToMap} />
-          </div>
-        )}
+            )}
 
-        {currentTab === 'ngos' && (
-          <NGODirectory ngos={ngos} onUpdateCapacity={handleUpdateNGOCapacity} />
-        )}
+            {currentTab === 'map' && (
+              <InteractiveMap
+                reports={reports}
+                ngos={ngos}
+                selectedReportId={selectedReportForModal?.id}
+                onSelectReport={(report) => setSelectedReportForModal(report)}
+                centerCoords={mapCenter}
+              />
+            )}
 
-        {currentTab === 'admin' && (
-          <AdminDashboard
-            reports={reports}
-            ngos={ngos}
-            onUpdateCaseStatus={handleUpdateStatus}
-            onDeleteCase={handleDeleteCase}
-            onUpdateNGOCapacity={handleUpdateNGOCapacity}
-            onCreateNGO={handleCreateNGO}
-            onDeleteNGO={handleDeleteNGO}
-          />
-        )}
-      </main>
+            {currentTab === 'cases' && (
+              <CaseFeed reports={reports} onSelectReport={(report) => setSelectedReportForModal(report)} onNavigateToMap={handleNavigateToMap} />
+            )}
 
-      <footer className="bg-white border-t border-stone-200 mt-12 py-6">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-stone-500 space-y-2">
-          <div className="flex items-center justify-center gap-2 text-stone-700 font-bold">
-            <span>PawPulse 流浪動物即時通報與救助媒合系統</span>
-            <span>·</span>
-            <span>Firebase 雲端持久化 × Google Gemini 多模態 AI</span>
-          </div>
-          <p className="max-w-xl mx-auto text-stone-400">
-            我們依照適用的個人資料保護法例處理通報者資料。若遇嚴重車禍或瀕危動物，{getEmergencyHint()}。
-          </p>
+            {currentTab === 'ngos' && (
+              <NGODirectory ngos={ngos} onUpdateCapacity={handleUpdateNGOCapacity} />
+            )}
+
+            {currentTab === 'admin' && (
+              <AdminDashboard
+                reports={reports}
+                ngos={ngos}
+                onUpdateCaseStatus={handleUpdateStatus}
+                onDeleteCase={handleDeleteCase}
+                onUpdateNGOCapacity={handleUpdateNGOCapacity}
+                onCreateNGO={handleCreateNGO}
+                onDeleteNGO={handleDeleteNGO}
+              />
+            )}
+          </main>
+
+          <footer className="border-t border-stone-200 px-4 sm:px-6 lg:px-8 py-4 mb-16 md:mb-0 text-2xs text-stone-400 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+            <span>PawPulse · 流浪動物即時通報與救助媒合</span>
+            <span>我哋按適用嘅個人資料保護法例處理通報者資料。若遇嚴重車禍或瀕危動物，{getEmergencyHint()}。</span>
+          </footer>
         </div>
-      </footer>
+      </div>
 
       {selectedReportForModal && (
         <CaseDetailModal

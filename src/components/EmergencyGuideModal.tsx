@@ -71,17 +71,17 @@ export const EmergencyGuideModal: React.FC<EmergencyGuideModalProps> = ({ onClos
           </div>
 
           {/* 24h Hotlines reminder */}
-          <div className="bg-amber-50 rounded-2xl p-4 border border-amber-200 text-xs">
-            <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-1.5">
-              <Phone className="w-4 h-4 text-amber-700" />
+          <div className="bg-brand-50 rounded-2xl p-4 border border-brand-200 text-xs">
+            <h4 className="font-bold text-brand-900 mb-2 flex items-center gap-1.5">
+              <Phone className="w-4 h-4 text-brand-700" />
               全港 24 小時動物緊急意外救援熱線備忘
             </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-amber-950 font-medium">
-              <div className="bg-white p-2.5 rounded-xl border border-amber-200/80">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-brand-950 font-medium">
+              <div className="bg-white p-2.5 rounded-xl border border-brand-200/80">
                 <span>愛護動物協會 (SPCA) 24h 熱線：</span>
                 <a href="tel:27111000" className="text-rose-600 font-bold block text-sm">2711 1000</a>
               </div>
-              <div className="bg-white p-2.5 rounded-xl border border-amber-200/80">
+              <div className="bg-white p-2.5 rounded-xl border border-brand-200/80">
                 <span>毛守救援 24h 緊急專線：</span>
                 <a href="tel:90604880" className="text-rose-600 font-bold block text-sm">9060 4880</a>
               </div>

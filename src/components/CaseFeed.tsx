@@ -70,7 +70,7 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="搜尋地點（如：旺角、沙田）、品種、或傷勢描述..."
-              className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
               id="case-search-input"
             />
           </div>
@@ -79,7 +79,7 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
             <button
               onClick={() => setSelectedAnimal('all')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                selectedAnimal === 'all' ? 'bg-amber-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                selectedAnimal === 'all' ? 'bg-brand-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
               }`}
             >
               全部 ({reports.length})
@@ -87,7 +87,7 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
             <button
               onClick={() => setSelectedAnimal('cat')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                selectedAnimal === 'cat' ? 'bg-amber-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                selectedAnimal === 'cat' ? 'bg-brand-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
               }`}
             >
               🐱 貓咪
@@ -95,7 +95,7 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
             <button
               onClick={() => setSelectedAnimal('dog')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                selectedAnimal === 'dog' ? 'bg-amber-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                selectedAnimal === 'dog' ? 'bg-brand-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
               }`}
             >
               🐶 犬隻
@@ -104,7 +104,7 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
             <button
               onClick={() => setSelectedAnimal('bird')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                selectedAnimal === 'bird' ? 'bg-amber-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                selectedAnimal === 'bird' ? 'bg-brand-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
               }`}
             >
               🕊️ 雀鳥
@@ -124,7 +124,7 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
                     ? lvl === 'P0'
                       ? 'bg-rose-600 text-white font-bold'
                       : lvl === 'P1'
-                      ? 'bg-amber-500 text-white font-bold'
+                      ? 'bg-brand-500 text-white font-bold'
                       : 'bg-stone-900 text-white font-bold'
                     : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
                 }`}
@@ -165,7 +165,7 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
 
       {reports.length === 0 ? (
         <div className="bg-white rounded-3xl border border-stone-200 p-12 text-center text-stone-500 shadow-xs space-y-3">
-          <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 mx-auto">
+          <div className="w-14 h-14 rounded-2xl bg-brand-50 border border-brand-200 flex items-center justify-center text-brand-600 mx-auto">
             <ShieldAlert className="w-7 h-7" />
           </div>
           <h3 className="text-base font-bold text-stone-800">目前雲端資料庫暫無任何通報個案</h3>
@@ -245,7 +245,7 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
                     {report.aiAnalysis && (
                       <div className="bg-stone-50 rounded-xl p-2.5 border border-stone-200/70 text-xs">
                         <div className="flex items-center gap-1 font-bold text-stone-800 mb-1">
-                          <Sparkles className="w-3 h-3 text-amber-600" />
+                          <Sparkles className="w-3 h-3 text-brand-600" />
                           <span>AI 診斷：{report.aiAnalysis.estimatedBreed || '未知'}</span>
                         </div>
                         {safeInjuries.length > 0 && (
@@ -259,7 +259,7 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
                     {report.matchedNGOs && report.matchedNGOs.length > 0 && (
                       <div className="flex items-center justify-between text-[11px] text-stone-500 pt-1">
                         <span>媒合首選：<strong className="text-stone-800">{report.matchedNGOs[0].name}</strong></span>
-                        <span className="text-amber-700 font-semibold">
+                        <span className="text-brand-700 font-semibold">
                           約 {Number.isFinite(report.matchedNGOs[0].distanceKm) ? `${report.matchedNGOs[0].distanceKm} km` : '未知距離'}
                         </span>
                       </div>
@@ -284,7 +284,7 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({
                     >
                       在地圖檢視
                     </button>
-                    <span className="text-amber-600 font-bold flex items-center gap-0.5">
+                    <span className="text-brand-600 font-bold flex items-center gap-0.5">
                       詳情 <ChevronRight className="w-3.5 h-3.5" />
                     </span>
                   </div>

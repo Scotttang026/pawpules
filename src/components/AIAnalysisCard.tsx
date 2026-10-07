@@ -22,9 +22,9 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({ analysis, compac
         return {
           label: 'P1 - 需醫療關注',
           subLabel: '骨折／開放外傷／幼貓幼犬／嚴重感染虛弱',
-          badgeClass: 'bg-amber-500 text-white',
-          bgClass: 'bg-amber-50 border-amber-200',
-          textColor: 'text-amber-900',
+          badgeClass: 'bg-brand-500 text-white',
+          bgClass: 'bg-brand-50 border-brand-200',
+          textColor: 'text-brand-900',
         };
       default:
         return {
@@ -63,7 +63,7 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({ analysis, compac
       <div className={`rounded-xl p-3 border ${urgency.bgClass}`} id="ai-analysis-compact">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-stone-700">
-            <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+            <Sparkles className="w-3.5 h-3.5 text-brand-600" />
             <span>AI 診斷簡報</span>
           </div>
           <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${urgency.badgeClass}`}>
@@ -85,7 +85,7 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({ analysis, compac
     <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden" id="ai-analysis-card">
       <div className="bg-gradient-to-r from-stone-900 via-stone-800 to-stone-900 text-white px-5 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+          <div className="w-8 h-8 rounded-lg bg-brand-500/20 text-brand-400 flex items-center justify-center border border-brand-500/30">
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
@@ -198,10 +198,10 @@ export const AIAnalysisCard: React.FC<AIAnalysisCardProps> = ({ analysis, compac
         </div>
 
         {safePrecautions.length > 0 && (
-          <div className="text-xs text-amber-800 bg-amber-50/80 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-xs text-brand-800 bg-brand-50/80 border border-brand-200 rounded-xl p-3 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-brand-600 shrink-0 mt-0.5" />
             <div className="leading-relaxed">
-              <strong className="block text-amber-900 mb-0.5">安全禁忌與防護提示：</strong>
+              <strong className="block text-brand-900 mb-0.5">安全禁忌與防護提示：</strong>
               {safePrecautions.join('；')}
             </div>
           </div>

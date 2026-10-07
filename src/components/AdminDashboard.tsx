@@ -154,7 +154,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   if (!user) {
     return (
       <div className="max-w-md mx-auto text-center py-16 space-y-4" id="admin-login-gate">
-        <div className="w-16 h-16 rounded-2xl bg-stone-900 text-amber-400 flex items-center justify-center mx-auto">
+        <div className="w-16 h-16 rounded-2xl bg-stone-900 text-brand-400 flex items-center justify-center mx-auto">
           <ShieldCheck className="w-8 h-8" />
         </div>
         <h2 className="text-lg font-bold text-stone-900">管理員後台需要登入</h2>
@@ -163,7 +163,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </p>
         <button
           onClick={signInWithGoogle}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 text-xs font-bold transition-colors shadow-xs cursor-pointer"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-stone-950 text-xs font-bold transition-colors shadow-xs cursor-pointer"
         >
           <LogIn className="w-4 h-4" />
           以 Google 帳號登入
@@ -188,7 +188,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   if (!isAdmin) {
     return (
       <div className="max-w-md mx-auto text-center py-16 space-y-4" id="admin-access-denied">
-        <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto" />
+        <AlertTriangle className="w-10 h-10 text-brand-500 mx-auto" />
         <h2 className="text-lg font-bold text-stone-900">存取被拒</h2>
         <p className="text-xs text-stone-500 leading-relaxed">
           帳號 <strong className="text-stone-700">{user.email}</strong> 已登入，但尚未獲授權存取管理員後台。
@@ -209,13 +209,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     <div className="space-y-6" id="admin-dashboard-view">
       <div className="bg-stone-900 text-white rounded-3xl p-6 shadow-xl border border-stone-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+          <div className="w-12 h-12 rounded-2xl bg-brand-500/20 border border-brand-500/30 flex items-center justify-center text-brand-400 shrink-0">
             <ShieldCheck className="w-7 h-7" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-bold tracking-tight">PawPulse 管理員與救助隊調度後台</h2>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500 text-stone-950">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-brand-500 text-stone-950">
                 Super Admin
               </span>
             </div>
@@ -340,7 +340,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               type="button"
                               onClick={() => handleRevealContact(c.id)}
                               disabled={loadingContactId === c.id}
-                              className="text-2xs text-amber-700 font-bold underline hover:text-amber-800 cursor-pointer disabled:opacity-50"
+                              className="text-2xs text-brand-700 font-bold underline hover:text-brand-800 cursor-pointer disabled:opacity-50"
                             >
                               {loadingContactId === c.id ? '載入中...' : '👁 查看報案人聯絡資料'}
                             </button>
@@ -354,7 +354,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <select
                         value={c.status}
                         onChange={(e) => onUpdateCaseStatus(c.id, e.target.value as CaseStatus)}
-                        className="px-2.5 py-1.5 rounded-xl text-xs bg-stone-50 border border-stone-300 font-medium focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                        className="px-2.5 py-1.5 rounded-xl text-xs bg-stone-50 border border-stone-300 font-medium focus:ring-2 focus:ring-brand-500 focus:outline-none"
                       >
                         <option value="pending">待處理 (Pending)</option>
                         <option value="in_progress">救援前往中 (In Progress)</option>
@@ -391,7 +391,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
             <button
               onClick={() => setShowAddNGOModal(true)}
-              className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+              className="px-3.5 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-stone-950 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               新增 NGO 機構
@@ -508,7 +508,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   }`}
                 >
                   <div className="flex items-center justify-between text-2xs text-stone-400 mb-1">
-                    <span className="font-bold uppercase tracking-wider text-amber-400">[{log.category}]</span>
+                    <span className="font-bold uppercase tracking-wider text-brand-400">[{log.category}]</span>
                     <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
                   </div>
                   <p className="font-sans font-medium">{log.message}</p>
@@ -529,7 +529,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-stone-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-stone-200 pb-3">
               <div className="flex items-center gap-2">
-                <Building2 className="w-5 h-5 text-amber-600" />
+                <Building2 className="w-5 h-5 text-brand-600" />
                 <h3 className="font-bold text-base text-stone-900">新增合作 NGO 機構至 Firestore</h3>
               </div>
               <button onClick={() => setShowAddNGOModal(false)} className="text-stone-400 hover:text-stone-600 font-bold">
@@ -540,22 +540,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <form onSubmit={handleSaveNewNGO} className="space-y-3.5 text-xs text-stone-700">
               <div>
                 <label className="block font-bold mb-1">機構中文全名 *</label>
-                <input type="text" value={newNGOName} onChange={(e) => setNewNGOName(e.target.value)} placeholder="例如：毛守救援 (PGRS)" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" required />
+                <input type="text" value={newNGOName} onChange={(e) => setNewNGOName(e.target.value)} placeholder="例如：毛守救援 (PGRS)" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500" required />
               </div>
 
               <div>
                 <label className="block font-bold mb-1">機構英文名稱</label>
-                <input type="text" value={newNGOEnglishName} onChange={(e) => setNewNGOEnglishName(e.target.value)} placeholder="例如：Paws Guardian Rescue Shelter" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                <input type="text" value={newNGOEnglishName} onChange={(e) => setNewNGOEnglishName(e.target.value)} placeholder="例如：Paws Guardian Rescue Shelter" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold mb-1">急救專線熱線 *</label>
-                  <input type="tel" value={newNGOHotline} onChange={(e) => setNewNGOHotline(e.target.value)} placeholder="例如 +852 2711 1000" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" required />
+                  <input type="tel" value={newNGOHotline} onChange={(e) => setNewNGOHotline(e.target.value)} placeholder="例如 +852 2711 1000" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500" required />
                 </div>
                 <div>
                   <label className="block font-bold mb-1">WhatsApp（連國家區號）</label>
-                  <input type="tel" value={newNGOWhatsapp} onChange={(e) => setNewNGOWhatsapp(e.target.value)} placeholder="例如 85291234567" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                  <input type="tel" value={newNGOWhatsapp} onChange={(e) => setNewNGOWhatsapp(e.target.value)} placeholder="例如 85291234567" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500" />
                 </div>
               </div>
 
@@ -581,15 +581,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="block font-bold mb-1">分區</label>
-                  <input type="text" value={newNGODistrict} onChange={(e) => setNewNGODistrict(e.target.value)} placeholder="例如：油尖旺區" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                  <input type="text" value={newNGODistrict} onChange={(e) => setNewNGODistrict(e.target.value)} placeholder="例如：油尖旺區" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500" />
                 </div>
                 <div>
                   <label className="block font-bold mb-1">緯度 (Lat)</label>
-                  <input type="text" value={newNGOLat} onChange={(e) => setNewNGOLat(e.target.value)} placeholder="自動填寫" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                  <input type="text" value={newNGOLat} onChange={(e) => setNewNGOLat(e.target.value)} placeholder="自動填寫" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500" />
                 </div>
                 <div>
                   <label className="block font-bold mb-1">經度 (Lng)</label>
-                  <input type="text" value={newNGOLng} onChange={(e) => setNewNGOLng(e.target.value)} placeholder="自動填寫" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                  <input type="text" value={newNGOLng} onChange={(e) => setNewNGOLng(e.target.value)} placeholder="自動填寫" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500" />
                 </div>
               </div>
 
@@ -602,7 +602,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         type="checkbox"
                         checked={newNGOAcceptedAnimals.includes(opt.value)}
                         onChange={() => toggleAcceptedAnimal(opt.value)}
-                        className="rounded text-amber-600 focus:ring-amber-500"
+                        className="rounded text-brand-600 focus:ring-brand-500"
                       />
                       {opt.label}
                     </label>
@@ -612,17 +612,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <div>
                 <label className="block font-bold mb-1">專長項目 (以逗號分隔)</label>
-                <input type="text" value={newNGOSpecialties} onChange={(e) => setNewNGOSpecialties(e.target.value)} placeholder="24h緊急出車, 唐狗急救, 誘捕籠" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
+                <input type="text" value={newNGOSpecialties} onChange={(e) => setNewNGOSpecialties(e.target.value)} placeholder="24h緊急出車, 唐狗急救, 誘捕籠" className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
 
               <div className="flex items-center gap-2 pt-1">
-                <input type="checkbox" id="ngo-24h-cb" checked={newNGO24h} onChange={(e) => setNewNGO24h(e.target.checked)} className="rounded text-amber-600 focus:ring-amber-500" />
+                <input type="checkbox" id="ngo-24h-cb" checked={newNGO24h} onChange={(e) => setNewNGO24h(e.target.checked)} className="rounded text-brand-600 focus:ring-brand-500" />
                 <label htmlFor="ngo-24h-cb" className="font-bold cursor-pointer">具備 24 小時緊急救援車與夜間執勤</label>
               </div>
 
               <div className="pt-3 border-t border-stone-200 flex items-center justify-end gap-2">
                 <button type="button" onClick={() => setShowAddNGOModal(false)} className="px-4 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold">取消</button>
-                <button type="submit" className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold shadow-xs cursor-pointer">儲存並發布至 Firestore</button>
+                <button type="submit" className="px-5 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-stone-950 font-bold shadow-xs cursor-pointer">儲存並發布至 Firestore</button>
               </div>
             </form>
           </div>

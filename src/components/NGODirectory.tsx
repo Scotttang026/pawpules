@@ -62,15 +62,15 @@ export const NGODirectory: React.FC<NGODirectoryProps> = ({ ngos, onUpdateCapaci
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="搜尋機構名稱、區域（如：元朗、灣仔、沙田）、或專責服務..."
-              className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
               id="ngo-search-input"
             />
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <button onClick={() => setSelectedAnimal('all')} className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${selectedAnimal === 'all' ? 'bg-amber-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'}`}>全部動物</button>
-            <button onClick={() => setSelectedAnimal('cat')} className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${selectedAnimal === 'cat' ? 'bg-amber-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'}`}>貓咪專長</button>
-            <button onClick={() => setSelectedAnimal('dog')} className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${selectedAnimal === 'dog' ? 'bg-amber-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'}`}>犬隻專長</button>
+            <button onClick={() => setSelectedAnimal('all')} className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${selectedAnimal === 'all' ? 'bg-brand-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'}`}>全部動物</button>
+            <button onClick={() => setSelectedAnimal('cat')} className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${selectedAnimal === 'cat' ? 'bg-brand-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'}`}>貓咪專長</button>
+            <button onClick={() => setSelectedAnimal('dog')} className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${selectedAnimal === 'dog' ? 'bg-brand-500 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'}`}>犬隻專長</button>
             <button onClick={() => setFilter24hOnly(!filter24hOnly)} className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors border ${filter24hOnly ? 'bg-rose-500 text-white border-rose-500' : 'bg-white text-stone-700 border-stone-300 hover:bg-stone-50'}`}>🚨 僅顯示 24 小時熱線</button>
           </div>
         </div>
@@ -150,7 +150,7 @@ export const NGODirectory: React.FC<NGODirectoryProps> = ({ ngos, onUpdateCapaci
               {isAdmin && onUpdateCapacity && (
                 <div className="p-2.5 rounded-xl bg-stone-50 border border-stone-200 text-2xs space-y-1.5">
                   <span className="font-bold text-stone-700 flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3 text-amber-600" />
+                    <ShieldCheck className="w-3 h-3 text-brand-600" />
                     管理員調度接案量：
                   </span>
                   <div className="grid grid-cols-3 gap-1">

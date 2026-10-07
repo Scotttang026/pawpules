@@ -3,7 +3,7 @@
 ## 1. Data Invariants
 1. **Case Integrity**: A case must possess an ID matching `^[a-zA-Z0-9_\\-]+$` with valid triage urgency (`P0`, `P1`, `P2`) and animal type.
 2. **Reporter Privacy**: Public case listings do not allow arbitrary users to tamper with reporter phone or email once created.
-3. **Role Enforcement**: Normal citizens cannot promote themselves to admins. Admin privilege requires document existence in `/adminuser/$(request.auth.uid)` or verified admin email `scotttang026jp@gmail.com`.
+3. **Role Enforcement**: Normal citizens cannot promote themselves to admins. Admin privilege requires document existence in `/adminuser/$(request.auth.uid)`.
 4. **State Transition Protection**: Case status must only be modified by assigned NGO rescuers or verified platform administrators.
 5. **Payload Bound**: All string fields have strict `.size()` upper bounds to guard against denial of wallet / storage exhaustion.
 6. **NGO Verification**: NGO capacity and verification statuses cannot be spoofed by unauthenticated clients.

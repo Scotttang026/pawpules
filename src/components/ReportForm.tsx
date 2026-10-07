@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { AnimalType, LocationCoords, StrayReport, NGOOrganization } from '../types';
 import { PRESET_LOCATIONS, geocodeAddressQuery, reverseGeocodeCoords } from '../utils/location';
 import AddressAutocomplete from './AddressAutocomplete';
+import { CatIcon, DogIcon, BirdIcon } from './AnimalIcons';
 import type { ResolvedAddress } from '../services/places';
 import { compressImage, uploadAnimalPhoto } from '../utils/imageCompressor';
 import { rankFirestoreNGOs } from '../services/caseService';
@@ -12,11 +13,10 @@ import {
   MapPin,
   LocateFixed,
   Search,
-  Sparkles,
   Check,
   Loader2,
-  Shield,
   Mail,
+  ArrowRight,
   RefreshCw,
   PhoneCall,
   FileText,
@@ -31,6 +31,32 @@ interface ReportFormProps {
   onSubmitReport: (newReport: StrayReport) => Promise<boolean>;
   onAnalysisStart?: () => void;
 }
+
+const inputClass =
+  'w-full px-3 py-2.5 text-sm bg-white border border-stone-200 rounded-lg placeholder:text-stone-400 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 transition-shadow';
+
+const RequiredTag: React.FC = () => (
+  <span className="text-2xs font-medium text-stone-500 px-2 py-0.5 rounded-full border border-stone-200">必填</span>
+);
+
+// 冇外框嘅表單分節：標題＋說明，右上角可以放額外操作
+const FormSection: React.FC<{
+  title: string;
+  hint?: string;
+  aside?: React.ReactNode;
+  children: React.ReactNode;
+}> = ({ title, hint, aside, children }) => (
+  <section className="py-6 border-b border-stone-200 first:pt-0 last:border-0">
+    <div className="flex items-start justify-between gap-3 mb-4">
+      <div>
+        <h3 className="text-[28px] leading-tight font-bold text-stone-900">{title}</h3>
+        {hint && <p className="text-xs text-stone-500 mt-1">{hint}</p>}
+      </div>
+      {aside && <div className="shrink-0">{aside}</div>}
+    </div>
+    {children}
+  </section>
+);
 
 export const ReportForm: React.FC<ReportFormProps> = ({
   ngos,
@@ -105,11 +131,11 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     if (!file) return;
 
     try {
-      setStatusMessage('正在智慧壓縮圖片尺寸...');
+      setStatusMessage('壓縮緊相片…');
       const { blob, dataUrl } = await compressImage(file, 1280, 1280, 0.82);
       setPhotoPreview(dataUrl);
       setPhotoBlob(blob);
-      setStatusMessage('✓ 現場圖片已壓縮完成，準備上傳至 Cloud Storage');
+      setStatusMessage('✓ 相片已準備好');
     } catch (err: any) {
       alert(err.message || '圖片處理失敗');
       setStatusMessage('');
@@ -226,7 +252,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     }
 
     setIsSubmitting(true);
-    setStatusMessage('🚀 正在準備通報資料...');
+    setStatusMessage('準備緊資料…');
     if (onAnalysisStart) onAnalysisStart();
 
     try {
@@ -240,7 +266,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
       let finalStoragePath = `animal-reports/${reportId}.jpg`;
 
       if (photoBlob) {
-        setStatusMessage('☁️ 正在上傳照片至 Cloud Storage 物件儲存...');
+        setStatusMessage('上傳緊相片…');
         const uploadResult = await uploadAnimalPhoto(photoBlob, reportId, photoPreview);
         finalPhotoUrl = uploadResult.downloadUrl;
         finalStoragePath = uploadResult.storagePath;
@@ -283,7 +309,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
       };
 
       // 先確認 Firestore 寫入成功；AI 分析同確認信由 App.tsx 喺成功後先觸發
-      setStatusMessage('☁️ 正在儲存案件，並由 Gemini AI 分析傷勢...');
+      setStatusMessage('儲存緊個案，AI 分析緊傷勢…');
       const saveSuccess = await onSubmitReport(newReport);
 
       if (!saveSuccess) {
@@ -300,402 +326,357 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     }
   };
 
+  const animalLabel =
+    animalType === 'cat' ? '貓' : animalType === 'dog' ? '狗' : customAnimalName.trim() || '其他／雀鳥';
+
+  const checklist: { label: string; value: string; done: boolean }[] = [
+    { label: '動物', value: animalLabel, done: true },
+    { label: '相片', value: photoPreview ? '已加入' : '未加入', done: !!photoPreview },
+    { label: '位置', value: locationConfirmed ? location.address : '未確認', done: locationConfirmed },
+    { label: '現場狀況', value: description.trim() ? '已填寫' : '未填寫', done: !!description.trim() },
+    { label: '電郵', value: reporterEmail.trim() || '未填寫', done: !!reporterEmail.trim() },
+  ];
+
   return (
-    <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-6 sm:p-8" id="report-form-container">
-      <div className="mb-6">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold mb-2">
-          <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-          個案即時通報 (P0 核心流程)
-        </div>
-        <h2 className="text-xl sm:text-2xl font-bold text-stone-900 tracking-tight">
-          通報流浪／受傷動物個案
-        </h2>
-        <p className="text-sm text-stone-600 mt-1">
-          拍攝現場照片並標記位置，Gemini 多模態 AI 將即時評估傷勢緊急程度，照片將自動壓縮上傳至 Cloud Storage 物件儲存，並即時媒合 Firestore 合作 NGO 機構。
-        </p>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Section 1: Animal Category */}
-        <div className="rounded-2xl border-2 border-stone-200 bg-stone-50/60 p-4 sm:p-5 shadow-xs space-y-3.5">
-          <div className="flex items-center justify-between border-b border-stone-200 pb-2.5">
-            <div className="flex items-center gap-2.5">
-              <span className="w-6 h-6 rounded-lg bg-stone-900 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                1
-              </span>
-              <h3 className="text-sm font-bold text-stone-900">動物類別確認</h3>
+    <div id="report-form-container">
+      <form
+        onSubmit={handleSubmit}
+        className="grid lg:grid-cols-[minmax(0,1fr)_340px] gap-8 lg:gap-12 items-start"
+      >
+        {/* 左欄：表單 */}
+        <div>
+          <FormSection title="動物" hint="幫 NGO 預備合適嘅人手同工具">
+            <div className="grid grid-cols-3 gap-3 max-w-md">
+              {([
+                ['cat', CatIcon, '貓'],
+                ['dog', DogIcon, '狗'],
+                ['other', BirdIcon, '其他／雀鳥'],
+              ] as const).map(([type, Icon, label]) => {
+                const selected = animalType === type;
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setAnimalType(type)}
+                    aria-pressed={selected}
+                    className={`group py-4 rounded-2xl border flex flex-col items-center gap-2 transition-all cursor-pointer ${
+                      selected
+                        ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
+                        : 'border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50'
+                    }`}
+                  >
+                    <Icon
+                      active={selected}
+                      className="w-14 h-14 text-stone-900 transition-transform group-hover:scale-105"
+                    />
+                    <span className={`text-sm ${selected ? 'font-semibold text-stone-900' : 'text-stone-600'}`}>
+                      {label}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-            <span className="text-2xs font-medium text-stone-600 bg-white px-2.5 py-0.5 rounded-full border border-stone-200">
-              有助加速 NGO 派遣專業隊伍
-            </span>
-          </div>
 
-          <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
-            <button
-              type="button"
-              onClick={() => setAnimalType('cat')}
-              className={`p-3 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1.5 cursor-pointer ${
-                animalType === 'cat'
-                  ? 'border-amber-500 bg-amber-50/80 text-amber-950 font-bold shadow-xs'
-                  : 'border-stone-200 bg-white text-stone-700 hover:border-stone-300'
-              }`}
-            >
-              <span className="text-2xl">🐱</span>
-              <span className="text-xs">流浪貓咪 (Cat)</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setAnimalType('dog')}
-              className={`p-3 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1.5 cursor-pointer ${
-                animalType === 'dog'
-                  ? 'border-amber-500 bg-amber-50/80 text-amber-950 font-bold shadow-xs'
-                  : 'border-stone-200 bg-white text-stone-700 hover:border-stone-300'
-              }`}
-            >
-              <span className="text-2xl">🐶</span>
-              <span className="text-xs">流浪狗隻 (Dog)</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setAnimalType('other')}
-              className={`p-3 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1.5 cursor-pointer ${
-                animalType === 'other'
-                  ? 'border-amber-500 bg-amber-50/80 text-amber-950 font-bold shadow-xs'
-                  : 'border-stone-200 bg-white text-stone-700 hover:border-stone-300'
-              }`}
-            >
-              <span className="text-2xl">🕊️</span>
-              <span className="text-xs">其他／鳥類 (Other)</span>
-            </button>
-          </div>
-
-          {animalType === 'other' && (
-            <div>
+            {animalType === 'other' && (
               <input
                 type="text"
                 value={customAnimalName}
                 onChange={(e) => setCustomAnimalName(e.target.value)}
-                placeholder="請備註物種名稱（例如：白鴿、八哥、刺蝟、天竺鼠）"
-                className="w-full p-2.5 text-xs bg-white border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
+                placeholder="物種名稱（選填），例如：白鴿、八哥、刺蝟"
+                className={`${inputClass} mt-3`}
               />
-            </div>
-          )}
-        </div>
+            )}
+          </FormSection>
 
-        {/* Section 2: Photo Upload & Compression */}
-        <div className="rounded-2xl border-2 border-stone-200 bg-stone-50/60 p-4 sm:p-5 shadow-xs space-y-3.5">
-          <div className="flex items-center justify-between border-b border-stone-200 pb-2.5">
-            <div className="flex items-center gap-2.5">
-              <span className="w-6 h-6 rounded-lg bg-stone-900 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                2
-              </span>
-              <h3 className="text-sm font-bold text-stone-900">
-                現場動物照片 (自動壓縮 + Cloud Storage 儲存)
-              </h3>
-            </div>
-            <span className="text-2xs font-bold text-rose-600 bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-200">
-              必須提供
-            </span>
-          </div>
+          <FormSection
+            title="相片"
+            hint="影受傷位置或者成隻動物，相片會自動壓縮"
+            aside={<RequiredTag />}
+          >
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept="image/*,.heic,.heif"
+              className="hidden"
+              id="file-upload-input"
+            />
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-28 h-28 rounded-xl overflow-hidden bg-stone-100 border border-stone-200 shrink-0 flex items-center justify-center text-stone-400 hover:bg-stone-200/60 transition-colors cursor-pointer"
+                aria-label="選擇相片"
+              >
+                {photoPreview ? (
+                  <img src={photoPreview} alt="現場相片預覽" className="w-full h-full object-cover" />
+                ) : (
+                  <Camera className="w-7 h-7 text-brand-400" strokeWidth={1.5} />
+                )}
+              </button>
 
-          <div className="flex flex-col sm:flex-row gap-4 items-center">
-            <div className="w-full sm:w-48 h-40 rounded-2xl overflow-hidden bg-stone-200 border-2 border-stone-300/80 shrink-0 relative group shadow-2xs">
-              {photoPreview ? (
-                <img src={photoPreview} alt="現場照片預覽" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center text-stone-400 gap-1.5 p-3 text-center">
-                  <Camera className="w-8 h-8" />
-                  <span className="text-2xs font-medium">請選擇照片或拍照</span>
-                </div>
-              )}
-            </div>
-
-            <div className="flex-1 space-y-2.5 w-full">
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                accept="image/*,.heic,.heif"
-                className="hidden"
-                id="file-upload-input"
-              />
-
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold flex items-center gap-2 transition-colors shadow-xs cursor-pointer"
+                  className="px-4 py-2 rounded-lg bg-stone-900 hover:bg-black text-white text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer"
                 >
                   <Upload className="w-4 h-4" />
-                  選擇手機／電腦照片
+                  {photoPreview ? '換一張相' : '選擇相片'}
                 </button>
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2.5 rounded-xl bg-white border border-stone-300 hover:bg-stone-50 text-stone-800 text-xs font-bold flex items-center gap-2 transition-colors shadow-2xs cursor-pointer"
+                  className="px-4 py-2 rounded-lg border border-stone-200 hover:bg-stone-50 text-stone-800 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer"
                 >
-                  <Camera className="w-4 h-4 text-stone-600" />
-                  拍照上傳
+                  <Camera className="w-4 h-4 text-brand-500" />
+                  影相
                 </button>
               </div>
+            </div>
+          </FormSection>
 
-              <p className="text-2xs text-stone-500 leading-relaxed">
-                📌 提示：請拍攝動物受傷部位或整體身形。照片將先進行前端 Canvas 智慧壓縮以節省您的手機數據流量，並由 Firebase Cloud Storage 永久託管。
-              </p>
+          <FormSection
+            title="位置"
+            hint="用嚟配對附近嘅救助隊"
+            aside={
+              <button
+                type="button"
+                onClick={handleGetCurrentLocation}
+                disabled={isGeolocating}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-stone-200 hover:bg-stone-50 text-xs font-medium transition-colors disabled:opacity-60 cursor-pointer"
+              >
+                {isGeolocating ? <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-500" /> : <LocateFixed className="w-3.5 h-3.5 text-brand-500" />}
+                用 GPS 定位
+              </button>
+            }
+          >
+            <div className="flex gap-2">
+              <div className="flex-1 min-w-0">
+                <AddressAutocomplete
+                  value={manualAddressInput}
+                  onChange={setManualAddressInput}
+                  onSelect={handleSelectPlace}
+                  onEnter={handleSearchManualAddress}
+                  bias={locationConfirmed ? { lat: location.lat, lng: location.lng } : null}
+                  placeholder="輸入地址或地標，例如：旺角朗豪坊"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleSearchManualAddress}
+                disabled={isSearchingAddress}
+                className="px-4 rounded-lg bg-stone-900 hover:bg-black text-white text-sm font-medium flex items-center gap-1.5 transition-colors shrink-0 disabled:opacity-60 cursor-pointer"
+              >
+                {isSearchingAddress ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                定位
+              </button>
             </div>
-          </div>
-        </div>
 
-        {/* Section 3: Location */}
-        <div className="rounded-2xl border-2 border-stone-200 bg-stone-50/60 p-4 sm:p-5 shadow-xs space-y-3.5">
-          <div className="flex items-center justify-between border-b border-stone-200 pb-2.5">
-            <div className="flex items-center gap-2.5">
-              <span className="w-6 h-6 rounded-lg bg-stone-900 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                3
-              </span>
-              <h3 className="text-sm font-bold text-stone-900">
-                發現位置標註 (自動比對鄰近救助隊)
-              </h3>
-            </div>
-            <button
-              type="button"
-              onClick={handleGetCurrentLocation}
-              disabled={isGeolocating}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 text-2xs font-bold transition-colors cursor-pointer"
-            >
-              {isGeolocating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LocateFixed className="w-3.5 h-3.5" />}
-              取得 GPS 定位
-            </button>
-          </div>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <AddressAutocomplete
-                value={manualAddressInput}
-                onChange={setManualAddressInput}
-                onSelect={handleSelectPlace}
-                onEnter={handleSearchManualAddress}
-                bias={locationConfirmed ? { lat: location.lat, lng: location.lng } : null}
-                placeholder="輸入地址或地標，例如：旺角朗豪坊、Shibuya Station、Times Square"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleSearchManualAddress}
-              disabled={isSearchingAddress}
-              className="px-4 py-2.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shrink-0 cursor-pointer"
-            >
-              {isSearchingAddress ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-              定位
-            </button>
-          </div>
-          {locationConfirmed ? (
-            <div className="p-3 bg-white border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2 truncate">
-                <MapPin className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="text-stone-800 truncate">
-                  已設定位置：<strong>{location.address}</strong>
+            {locationConfirmed ? (
+              <div className="mt-3 flex items-center gap-2 text-sm min-w-0">
+                <MapPin className="w-4 h-4 text-brand-500 shrink-0" />
+                <span className="truncate">
+                  {location.address}
                   {location.district && <span className="text-stone-500">（{location.district}）</span>}
                 </span>
+                <span className="ml-auto pl-2 text-2xs text-stone-400 font-mono shrink-0">
+                  {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
+                </span>
               </div>
-              <span className="text-2xs text-stone-500 shrink-0 ml-2 font-mono">
-                ({location.lat.toFixed(4)}, {location.lng.toFixed(4)})
-              </span>
-            </div>
-          ) : (
-            <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-center gap-2 text-xs text-amber-900">
-              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>尚未確認位置：請撳「取得 GPS 定位」，或者喺上面地址欄輸入並揀一個建議地址。</span>
-            </div>
-          )}
-        </div>
+            ) : (
+              <p className="mt-3 flex items-center gap-1.5 text-xs text-stone-500">
+                <AlertCircle className="w-3.5 h-3.5 text-brand-500 shrink-0" />
+                未確認位置：撳「用 GPS 定位」，或者輸入地址再揀一個建議。
+              </p>
+            )}
+          </FormSection>
 
-        {/* Section 4: Notes and Reporter details */}
-        <div className="rounded-2xl border-2 border-stone-200 bg-stone-50/60 p-4 sm:p-5 shadow-xs space-y-3.5">
-          <div className="flex items-center justify-between border-b border-stone-200 pb-2.5">
-            <div className="flex items-center gap-2.5">
-              <span className="w-6 h-6 rounded-lg bg-stone-900 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                4
-              </span>
-              <h3 className="text-sm font-bold text-stone-900">
-                現場狀況描述與通報者聯絡信箱
-              </h3>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1.5 text-2xs text-stone-700 font-bold cursor-pointer">
+          <FormSection title="現場狀況" hint="動物喺邊、有咩傷、精神狀態點" aside={<RequiredTag />}>
+            <textarea
+              rows={4}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="例如：貓咪縮喺花槽，左腳唔敢落地；或者狗疑似俾車撞到，呼吸急促…"
+              className={`${inputClass} resize-y`}
+              required
+            />
+          </FormSection>
+
+          <FormSection
+            title="聯絡資料"
+            hint="唔會公開，只供管理員同救援機構聯絡你"
+            aside={
+              <label className="flex items-center gap-1.5 text-xs text-stone-700 font-medium cursor-pointer">
                 <input
                   type="checkbox"
                   checked={isAnonymous}
                   onChange={(e) => setIsAnonymous(e.target.checked)}
-                  className="rounded text-amber-600 focus:ring-amber-500"
+                  className="rounded accent-brand-500"
                 />
-                匿名通報 (隱藏稱呼與電話)
+                匿名通報
               </label>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-stone-800 mb-1.5">
-                現場狀況描述／傷病觀察 *
-              </label>
-              <textarea
-                rows={4}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="例如：貓咪縮在花槽，左腳不敢著地；或狗隻疑似被車擦撞倒地，呼吸急促..."
-                className="w-full p-3 text-xs bg-white border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
-                required
-              />
-            </div>
-
-            <div className="space-y-3">
+            }
+          >
+            <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-stone-800 mb-1.5 flex items-center justify-between">
-                  <span>
-                    電子郵件 <span className="text-rose-600">*</span> (接收立案確認信與 CASE ID 追蹤進度)
-                  </span>
+                <label className="block text-xs font-medium text-stone-700 mb-1.5">
+                  電郵 <span className="text-rose-600">*</span>
+                  <span className="ml-1.5 font-normal text-stone-400">接收確認信同追蹤連結</span>
                 </label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-stone-400 absolute left-3 top-3" />
+                  <Mail className="w-4 h-4 text-brand-500 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="email"
                     value={reporterEmail}
                     onChange={(e) => setReporterEmail(e.target.value)}
-                    placeholder="例如：user@example.com"
-                    className="w-full pl-9 pr-3 py-2.5 text-xs bg-white border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                    placeholder="user@example.com"
+                    className={`${inputClass} pl-9`}
                     required
                   />
                 </div>
               </div>
 
               {!isAnonymous && (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-stone-800 mb-1">
-                      聯絡電話 (NGO聯絡)
-                    </label>
+                    <label className="block text-xs font-medium text-stone-700 mb-1.5">電話（選填）</label>
                     <input
                       type="tel"
                       value={reporterPhone}
                       onChange={(e) => setReporterPhone(e.target.value)}
                       placeholder="+852 9123 4567"
-                      className="w-full p-2.5 text-xs bg-white border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                      className={inputClass}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-stone-800 mb-1">稱呼 (選填)</label>
+                    <label className="block text-xs font-medium text-stone-700 mb-1.5">稱呼（選填）</label>
                     <input
                       type="text"
                       value={reporterName}
                       onChange={(e) => setReporterName(e.target.value)}
                       placeholder="陳先生"
-                      className="w-full p-2.5 text-xs bg-white border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                      className={inputClass}
                     />
                   </div>
                 </div>
               )}
             </div>
-          </div>
+          </FormSection>
         </div>
 
-        {/* Section 5: Anti-Abuse & Privacy Statement */}
-        <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-amber-600 shrink-0" />
-              <span className="text-xs font-bold text-stone-900">防濫用機制 (Anti-Spam Verification)</span>
-            </div>
+        {/* 右欄：摘要＋送出 */}
+        <aside className="lg:sticky lg:top-24 rounded-2xl border border-stone-200 bg-stone-50 p-5 space-y-5">
+          <div className="hidden lg:flex aspect-[4/3] rounded-xl overflow-hidden bg-stone-200/70 items-center justify-center text-stone-400">
+            {photoPreview ? (
+              <img src={photoPreview} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <Camera className="w-8 h-8 text-brand-400" strokeWidth={1.5} />
+            )}
+          </div>
 
+          <ul className="space-y-2.5">
+            {checklist.map(({ label, value, done }) => (
+              <li key={label} className="flex items-center gap-2.5 text-sm">
+                {done ? (
+                  <span className="w-4 h-4 rounded-full bg-brand-500 text-white flex items-center justify-center shrink-0">
+                    <Check className="w-2.5 h-2.5" strokeWidth={3} />
+                  </span>
+                ) : (
+                  <span className="w-4 h-4 rounded-full border-[1.5px] border-stone-300 shrink-0" />
+                )}
+                <span className="text-stone-500 shrink-0">{label}</span>
+                <span className={`ml-auto truncate text-right ${done ? 'text-stone-900' : 'text-stone-400'}`}>{value}</span>
+              </li>
+            ))}
+          </ul>
+
+          <div className="pt-4 border-t border-stone-200">
+            <label className="block text-xs font-medium text-stone-700 mb-1.5">驗證碼</label>
             <div className="flex items-center gap-2">
-              <span className="text-2xs text-stone-600">請輸入右方驗證碼：</span>
-              <div className="px-3 py-1 bg-stone-900 text-amber-300 font-mono font-bold tracking-widest text-sm rounded-lg shadow-inner select-none">
+              <div className="px-3 py-2 bg-stone-900 text-white font-mono font-bold tracking-widest text-sm rounded-lg select-none">
                 {captchaCode}
               </div>
               <button
                 type="button"
                 onClick={refreshCaptcha}
-                className="p-1 rounded-lg hover:bg-stone-200 text-stone-500 transition-colors cursor-pointer"
-                title="更換驗證碼"
+                className="p-2 rounded-lg hover:bg-stone-200 text-stone-500 transition-colors cursor-pointer"
+                title="換一個驗證碼"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
+                <RefreshCw className="w-4 h-4 text-brand-500" />
               </button>
               <input
                 type="text"
                 maxLength={4}
                 value={userCaptchaInput}
                 onChange={(e) => setUserCaptchaInput(e.target.value.toUpperCase())}
-                placeholder="4位代碼"
-                className="w-20 p-1.5 text-xs uppercase font-mono font-bold text-center bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                placeholder="輸入 4 位"
+                className={`${inputClass} flex-1 min-w-0 uppercase font-mono text-center`}
                 required
               />
             </div>
           </div>
 
-          <div className="pt-2 border-t border-stone-200/80 flex items-start gap-2">
+          <div className="flex items-start gap-2">
             <input
               type="checkbox"
               id="privacy-consent"
               checked={agreedPrivacy}
               onChange={(e) => setAgreedPrivacy(e.target.checked)}
-              className="mt-0.5 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+              className="mt-0.5 rounded accent-brand-500 cursor-pointer"
               required
             />
-            <label htmlFor="privacy-consent" className="text-2xs text-stone-600 leading-relaxed cursor-pointer">
-              本人同意提供上述資料，並明瞭：動物相片、發現位置及狀況描述會<strong>公開顯示</strong>於地圖及個案列表；
-              稱呼、電話及電郵<strong>不會公開</strong>，只供管理員及受委託救援機構聯絡之用；相片及描述會交由 Google Gemini AI 作初步分析。同時理解{' '}
+            <label htmlFor="privacy-consent" className="text-2xs text-stone-500 leading-relaxed cursor-pointer">
+              本人同意提供上述資料，並明瞭：動物相片、發現位置及狀況描述會<strong className="text-stone-700">公開顯示</strong>於地圖及個案列表；
+              稱呼、電話及電郵<strong className="text-stone-700">不會公開</strong>，只供管理員及受委託救援機構聯絡之用；相片及描述會交由 Google Gemini AI 作初步分析。同時理解{' '}
               <button
                 type="button"
                 onClick={() => setShowPrivacyModal(true)}
-                className="text-amber-700 font-bold underline hover:text-amber-800 cursor-pointer"
+                className="text-stone-900 font-medium underline underline-offset-2 cursor-pointer"
               >
                 AI 傷病分診免責聲明與個人資料收集聲明 (PICS)
               </button>
               。
             </label>
           </div>
-        </div>
 
-        {/* Submission error */}
-        {submitError && (
-          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{submitError}</span>
-          </div>
-        )}
-
-        {/* Live Status indicator if processing */}
-        {statusMessage && (
-          <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs flex items-center gap-2">
-            {isSubmitting ? (
-              <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
-            ) : (
-              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-            )}
-            <span>{statusMessage}</span>
-          </div>
-        )}
-
-        {/* Submit Button */}
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          id="btn-submit-report"
-          className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-amber-600 hover:opacity-95 text-white font-bold text-sm tracking-wide shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              <span>正在上傳照片及儲存案件，AI 將自動分析傷勢...</span>
-            </>
-          ) : (
-            <>
-              <Sparkles className="w-5 h-5" />
-              <span>立即送出通報 ＋ 啟動 AI 智能判斷與 NGO 媒合</span>
-            </>
+          {submitError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{submitError}</span>
+            </div>
           )}
-        </button>
+
+          {statusMessage && (
+            <div className="p-3 bg-white border border-stone-200 text-stone-700 rounded-lg text-xs flex items-center gap-2">
+              {isSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+              ) : (
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              )}
+              <span>{statusMessage}</span>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            id="btn-submit-report"
+            className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                送出緊…
+              </>
+            ) : (
+              <>
+                送出通報
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
+          </button>
+        </aside>
       </form>
 
       {/* PICS & AI Disclaimer Modal */}
@@ -704,7 +685,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
           <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-stone-200 space-y-4 max-h-[85vh] overflow-y-auto text-xs text-stone-700">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-amber-600" />
+                <FileText className="w-5 h-5 text-brand-600" />
                 <h3 className="font-bold text-sm text-stone-900">法律私隱與 AI 獸醫免責聲明</h3>
               </div>
               <button

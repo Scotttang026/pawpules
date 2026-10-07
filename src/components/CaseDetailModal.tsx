@@ -109,7 +109,7 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                 report.urgency === 'P0'
                   ? 'bg-rose-600 animate-pulse'
                   : report.urgency === 'P1'
-                  ? 'bg-amber-500'
+                  ? 'bg-brand-500'
                   : 'bg-emerald-600'
               }`}
             >
@@ -170,7 +170,7 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
               </div>
               {report.storagePath && (
                 <p className="text-3xs text-stone-500 font-mono mt-1.5 truncate px-1" title={report.storagePath}>
-                  ☁️ Storage: <span className="text-amber-800">{report.storagePath}</span>
+                  ☁️ Storage: <span className="text-brand-800">{report.storagePath}</span>
                 </p>
               )}
             </div>
@@ -233,14 +233,14 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                 </div>
               </div>
 
-              <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-200">
+              <div className="p-3.5 rounded-2xl bg-brand-50/60 border border-brand-200">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-amber-600" />
+                  <span className="text-xs font-bold text-brand-900 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-brand-600" />
                     救援進度狀態 (Firestore 即時共享)：
                   </span>
                   {canManageStatus && (
-                    <span className="text-2xs bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full font-bold">
+                    <span className="text-2xs bg-brand-200 text-brand-900 px-2 py-0.5 rounded-full font-bold">
                       管理員可任意變更
                     </span>
                   )}
@@ -255,7 +255,7 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                         onClick={() => onUpdateStatus!(report.id, opt.status)}
                         className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
                           report.status === opt.status
-                            ? 'bg-amber-600 text-white border-amber-600 shadow-xs ring-2 ring-amber-300'
+                            ? 'bg-brand-600 text-white border-brand-600 shadow-xs ring-2 ring-brand-300'
                             : 'bg-white text-stone-700 border-stone-300 hover:bg-stone-100'
                         }`}
                       >
@@ -278,7 +278,7 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
               onClick={() => setActiveTab('ai')}
               className={`pb-2.5 px-4 text-xs font-bold border-b-2 transition-colors ${
                 activeTab === 'ai'
-                  ? 'border-amber-600 text-amber-600'
+                  ? 'border-brand-600 text-brand-600'
                   : 'border-transparent text-stone-500 hover:text-stone-800'
               }`}
             >
@@ -288,7 +288,7 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
               onClick={() => setActiveTab('ngos')}
               className={`pb-2.5 px-4 text-xs font-bold border-b-2 transition-colors ${
                 activeTab === 'ngos'
-                  ? 'border-amber-600 text-amber-600'
+                  ? 'border-brand-600 text-brand-600'
                   : 'border-transparent text-stone-500 hover:text-stone-800'
               }`}
             >

@@ -214,11 +214,11 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       <div className="absolute top-4 left-4 right-4 z-[1000] flex flex-wrap items-center justify-between gap-2 pointer-events-none">
         <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-white/95 backdrop-blur border border-stone-200 shadow-md pointer-events-auto flex-wrap">
           <div className="flex items-center gap-1 border-r border-stone-200 pr-1.5 mr-0.5">
-            <button onClick={() => setFilterAnimal('all')} className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${filterAnimal === 'all' ? 'bg-amber-500 text-white' : 'text-stone-700 hover:bg-stone-100'}`}>全部物種</button>
-            <button onClick={() => setFilterAnimal('cat')} className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${filterAnimal === 'cat' ? 'bg-amber-500 text-white' : 'text-stone-700 hover:bg-stone-100'}`}>🐱 貓咪</button>
-            <button onClick={() => setFilterAnimal('dog')} className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${filterAnimal === 'dog' ? 'bg-amber-500 text-white' : 'text-stone-700 hover:bg-stone-100'}`}>🐶 犬隻</button>
+            <button onClick={() => setFilterAnimal('all')} className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${filterAnimal === 'all' ? 'bg-brand-500 text-white' : 'text-stone-700 hover:bg-stone-100'}`}>全部物種</button>
+            <button onClick={() => setFilterAnimal('cat')} className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${filterAnimal === 'cat' ? 'bg-brand-500 text-white' : 'text-stone-700 hover:bg-stone-100'}`}>🐱 貓咪</button>
+            <button onClick={() => setFilterAnimal('dog')} className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${filterAnimal === 'dog' ? 'bg-brand-500 text-white' : 'text-stone-700 hover:bg-stone-100'}`}>🐶 犬隻</button>
             {/* ⚠️ 已補上 bird 篩選 */}
-            <button onClick={() => setFilterAnimal('bird')} className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${filterAnimal === 'bird' ? 'bg-amber-500 text-white' : 'text-stone-700 hover:bg-stone-100'}`}>🕊️ 雀鳥</button>
+            <button onClick={() => setFilterAnimal('bird')} className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${filterAnimal === 'bird' ? 'bg-brand-500 text-white' : 'text-stone-700 hover:bg-stone-100'}`}>🕊️ 雀鳥</button>
           </div>
 
           <div className="flex items-center gap-1">
@@ -242,7 +242,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
       {reports.length === 0 && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-white/95 backdrop-blur px-4 py-2.5 rounded-2xl border border-stone-200 shadow-lg text-xs text-stone-700 font-medium flex items-center gap-2 pointer-events-auto">
-          <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+          <span className="w-2 h-2 rounded-full bg-brand-500 shrink-0" />
           <span>目前 Firestore 資料庫中尚無待救援個案標記</span>
         </div>
       )}
@@ -273,8 +273,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               <p className="font-semibold text-stone-900 truncate mb-1">📍 {activeReport.location.address}</p>
               <p className="line-clamp-2 text-stone-500 mb-1">{activeReport.description}</p>
               {safeActiveInjuries.length > 0 && (
-                <div className="flex items-center gap-1 text-[11px] text-amber-700 font-medium">
-                  <Sparkles className="w-3 h-3 text-amber-600" />
+                <div className="flex items-center gap-1 text-[11px] text-brand-700 font-medium">
+                  <Sparkles className="w-3 h-3 text-brand-600" />
                   <span>AI: {safeActiveInjuries[0]}</span>
                 </div>
               )}
@@ -286,7 +286,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               <ExternalLink className="w-3.5 h-3.5" />
               在 Google 地圖導航
             </a>
-            <button type="button" onClick={() => onSelectReport(activeReport)} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold shadow-xs transition-colors">
+            <button type="button" onClick={() => onSelectReport(activeReport)} className="px-3 py-1.5 bg-brand-500 hover:bg-brand-600 text-white rounded-lg text-xs font-bold shadow-xs transition-colors">
               檢視完整診斷 ＆ 媒合
             </button>
           </div>

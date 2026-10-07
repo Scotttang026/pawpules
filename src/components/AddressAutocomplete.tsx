@@ -122,7 +122,7 @@ export default function AddressAutocomplete({
 
   return (
     <div className="relative w-full">
-      <MapPin className="w-4 h-4 text-rose-500 absolute left-3 top-3 pointer-events-none" />
+      <MapPin className="w-4 h-4 text-brand-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
       <input
         type="text"
         role="combobox"
@@ -135,7 +135,7 @@ export default function AddressAutocomplete({
         disabled={disabled}
         placeholder={placeholder}
         maxLength={200}
-        className="w-full pl-9 pr-9 py-2.5 text-xs bg-white border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+        className="w-full pl-9 pr-9 py-2.5 text-sm bg-white border border-stone-200 rounded-lg placeholder:text-stone-400 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 transition-shadow"
         onChange={(e) => {
           onChange(e.target.value);
           if (!composingRef.current) setQuery(e.target.value);
@@ -155,14 +155,14 @@ export default function AddressAutocomplete({
       />
 
       {loading && (
-        <Loader2 className="w-4 h-4 text-stone-400 animate-spin absolute right-3 top-3" />
+        <Loader2 className="w-4 h-4 text-stone-400 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
       )}
 
       {open && (suggestions.length > 0 || error) && (
         <ul
           id="address-suggestion-list"
           role="listbox"
-          className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-xl border border-stone-200 bg-white shadow-lg"
+          className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-stone-200 bg-white shadow-lg"
         >
           {error && <li className="px-4 py-3 text-xs text-rose-600">{error}</li>}
           {suggestions.map((s, i) => (
@@ -170,11 +170,11 @@ export default function AddressAutocomplete({
               key={s.placeId}
               role="option"
               aria-selected={i === activeIndex}
-              className={`cursor-pointer px-4 py-2.5 ${i === activeIndex ? 'bg-amber-50' : 'hover:bg-stone-50'}`}
+              className={`cursor-pointer px-4 py-2.5 ${i === activeIndex ? 'bg-stone-100' : 'hover:bg-stone-50'}`}
               onMouseDown={(e) => e.preventDefault()} // 防止 input 先 blur 令清單消失
               onClick={() => handleSelect(s)}
             >
-              <div className="text-xs font-bold text-stone-900">{s.mainText}</div>
+              <div className="text-sm font-medium text-stone-900">{s.mainText}</div>
               {s.secondaryText && <div className="text-2xs text-stone-500">{s.secondaryText}</div>}
             </li>
           ))}
