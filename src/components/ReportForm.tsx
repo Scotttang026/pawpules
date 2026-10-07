@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { AnimalType, LocationCoords, StrayReport, NGOOrganization } from '../types';
 import { PRESET_LOCATIONS, geocodeAddressQuery, reverseGeocodeCoords } from '../utils/location';
 import AddressAutocomplete from './AddressAutocomplete';
@@ -6,6 +7,7 @@ import { CatIcon, DogIcon, BirdIcon } from './AnimalIcons';
 import type { ResolvedAddress } from '../services/places';
 import { compressImage, uploadAnimalPhoto } from '../utils/imageCompressor';
 import { rankFirestoreNGOs } from '../services/caseService';
+import { animalLabel } from '../utils/caseLabels';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Camera,
@@ -35,9 +37,14 @@ interface ReportFormProps {
 const inputClass =
   'w-full px-3 py-2.5 text-sm bg-white border border-stone-200 rounded-lg placeholder:text-stone-400 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 transition-shadow';
 
-const RequiredTag: React.FC = () => (
-  <span className="text-2xs font-medium text-stone-500 px-2 py-0.5 rounded-full border border-stone-200">必填</span>
-);
+const RequiredTag: React.FC = () => {
+  const { t } = useTranslation();
+  return (
+    <span className="text-2xs font-medium text-stone-500 px-2 py-0.5 rounded-full border border-stone-200">
+      {t('reportForm.required')}
+    </span>
+  );
+};
 
 // 冇外框嘅表單分節：標題＋說明，右上角可以放額外操作
 const FormSection: React.FC<{
@@ -58,11 +65,8 @@ const FormSection: React.FC<{
   </section>
 );
 
-export const ReportForm: React.FC<ReportFormProps> = ({
-  ngos,
-  onSubmitReport,
-  onAnalysisStart,
-}) => {
+export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, onAnalysisStart }) => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [animalType, setAnimalType] = useState<AnimalType>('cat');
   const [customAnimalName, setCustomAnimalName] = useState('');
@@ -84,7 +88,9 @@ export const ReportForm: React.FC<ReportFormProps> = ({
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState('');
+  // 儲存翻譯 key 而唔係文字，咁中途轉語言都會即刻跟住轉
+  const [submitErrorKey, setSubmitErrorKey] = useState<string | null>(null);
+  const [statusKey, setStatusKey] = useState<string | null>(null);
 
   const refreshCaptcha = () => {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -100,14 +106,10 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     refreshCaptcha();
   }, []);
 
-  // Update email if user signs in
+  // 用戶登入之後自動填電郵同稱呼
   useEffect(() => {
-    if (user?.email) {
-      setReporterEmail(user.email);
-    }
-    if (user?.displayName) {
-      setReporterName(user.displayName);
-    }
+    if (user?.email) setReporterEmail(user.email);
+    if (user?.displayName) setReporterName(user.displayName);
   }, [user]);
 
   // Location state（預設值只係佔位，市民必須主動確認位置先可以送出）
@@ -122,57 +124,56 @@ export const ReportForm: React.FC<ReportFormProps> = ({
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
   const [locationConfirmed, setLocationConfirmed] = useState(false);
 
-  const [statusMessage, setStatusMessage] = useState('');
-
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const districtOrPending = (d?: string) => d || t('reportForm.location.districtPending');
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     try {
-      setStatusMessage('壓縮緊相片…');
+      setStatusKey('reportForm.progress.compressing');
       const { blob, dataUrl } = await compressImage(file, 1280, 1280, 0.82);
       setPhotoPreview(dataUrl);
       setPhotoBlob(blob);
-      setStatusMessage('✓ 相片已準備好');
+      setStatusKey('reportForm.progress.photoReady');
     } catch (err: any) {
-      alert(err.message || '圖片處理失敗');
-      setStatusMessage('');
+      console.warn('Image processing failed:', err?.message || err);
+      alert(t('reportForm.errors.photoProcessFailed'));
+      setStatusKey(null);
     }
   };
 
   const handleGetCurrentLocation = () => {
     if (!navigator.geolocation) {
-      alert('您的裝置或瀏覽器不支援地理定位');
+      alert(t('reportForm.errors.noGeolocation'));
       return;
     }
 
     setIsGeolocating(true);
-    setStatusMessage('正在透過 GPS 定位目前位置...');
+    setStatusKey('reportForm.progress.gpsLocating');
 
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const { latitude, longitude } = pos.coords;
         try {
           const { address, district } = await reverseGeocodeCoords(latitude, longitude);
-          setLocation({ lat: latitude, lng: longitude, address, district: district || '待確認地區' });
+          setLocation({ lat: latitude, lng: longitude, address, district: districtOrPending(district) });
           setManualAddressInput(address);
           setLocationConfirmed(true);
-          setStatusMessage('✓ GPS 定位成功');
+          setStatusKey('reportForm.progress.gpsSuccess');
         } catch (err) {
           console.warn('Reverse geocode failed:', err);
-          setStatusMessage('已取得 GPS 座標，但未能轉換成地址，請手動輸入地址');
+          setStatusKey('reportForm.progress.gpsNoAddress');
         } finally {
           setIsGeolocating(false);
         }
       },
       (err) => {
         setIsGeolocating(false);
-        setStatusMessage(
-          err.code === err.PERMISSION_DENIED
-            ? '你未允許定位權限，請手動輸入地址'
-            : 'GPS 定位失敗，請手動輸入地址'
+        setStatusKey(
+          err.code === err.PERMISSION_DENIED ? 'reportForm.progress.gpsDenied' : 'reportForm.progress.gpsFailed'
         );
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
@@ -184,7 +185,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     if (!query) return;
 
     setIsSearchingAddress(true);
-    setStatusMessage('正在搜尋地址座標...');
+    setStatusKey('reportForm.progress.searching');
     try {
       const result = await geocodeAddressQuery(query);
       if (result) {
@@ -192,16 +193,16 @@ export const ReportForm: React.FC<ReportFormProps> = ({
           lat: result.lat,
           lng: result.lng,
           address: result.address,
-          district: result.district || '待確認地區',
+          district: districtOrPending(result.district),
         });
         setLocationConfirmed(true);
-        setStatusMessage('✓ 已找到地址位置');
+        setStatusKey('reportForm.progress.found');
       } else {
-        setStatusMessage('搵唔到呢個地址嘅位置，請喺建議清單揀一個地址，或者撳「取得 GPS 定位」。');
+        setStatusKey('reportForm.progress.notFound');
       }
     } catch (err) {
       console.warn('Geocode failed:', err);
-      setStatusMessage('地址搜尋暫時無法使用，請稍後再試，或者撳「取得 GPS 定位」。');
+      setStatusKey('reportForm.progress.searchUnavailable');
     } finally {
       setIsSearchingAddress(false);
     }
@@ -209,50 +210,50 @@ export const ReportForm: React.FC<ReportFormProps> = ({
 
   // 市民喺自動完成清單揀咗地址
   const handleSelectPlace = (p: ResolvedAddress) => {
-    setLocation({ lat: p.lat, lng: p.lng, address: p.address, district: p.district || '待確認地區' });
+    setLocation({ lat: p.lat, lng: p.lng, address: p.address, district: districtOrPending(p.district) });
     setManualAddressInput(p.address);
     setLocationConfirmed(true);
-    setStatusMessage('✓ 已找到地址位置');
+    setStatusKey('reportForm.progress.found');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitError('');
+    setSubmitErrorKey(null);
 
     if (!photoBlob && !photoPreview) {
-      alert('請先上傳或拍攝動物現場照片');
+      alert(t('reportForm.errors.noPhoto'));
       return;
     }
 
     if (!description.trim()) {
-      alert('請填寫現場動物狀況描述');
+      alert(t('reportForm.errors.noDescription'));
       return;
     }
 
     if (!locationConfirmed) {
-      alert('請先確認發現位置：撳「取得 GPS 定位」，或者喺地址欄揀一個建議地址。');
+      alert(t('reportForm.errors.noLocation'));
       return;
     }
 
     const phone = reporterPhone.trim();
     if (!isAnonymous && phone && !/^\+?[0-9 ()-]{6,30}$/.test(phone)) {
-      alert('電話格式不正確，請只輸入數字，可以加國家區號，例如 +852 9123 4567');
+      alert(t('reportForm.errors.badPhone'));
       return;
     }
 
     if (userCaptchaInput.trim().toUpperCase() !== captchaCode.toUpperCase()) {
-      alert('防濫用驗證碼不正確，請重新輸入以保障通報真實性。');
+      alert(t('reportForm.errors.badCaptcha'));
       refreshCaptcha();
       return;
     }
 
     if (!agreedPrivacy) {
-      alert('請先閱讀並勾選同意《個人資料（私隱）條例》通報者聲明及 AI 獸醫分診免責條款。');
+      alert(t('reportForm.errors.noConsent'));
       return;
     }
 
     setIsSubmitting(true);
-    setStatusMessage('準備緊資料…');
+    setStatusKey('reportForm.progress.preparing');
     if (onAnalysisStart) onAnalysisStart();
 
     try {
@@ -266,7 +267,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
       let finalStoragePath = `animal-reports/${reportId}.jpg`;
 
       if (photoBlob) {
-        setStatusMessage('上傳緊相片…');
+        setStatusKey('reportForm.progress.uploading');
         const uploadResult = await uploadAnimalPhoto(photoBlob, reportId, photoPreview);
         finalPhotoUrl = uploadResult.downloadUrl;
         finalStoragePath = uploadResult.storagePath;
@@ -274,7 +275,8 @@ export const ReportForm: React.FC<ReportFormProps> = ({
 
       // firestore.rules 限制 photoUrl 長度上限 2048；如果仲係 base64 dataURL 代表上傳未完成
       if (finalPhotoUrl.length > 2048) {
-        throw new Error('照片連結過長，可能係上傳步驟未完成，請重新選擇照片再試一次。');
+        setSubmitErrorKey('reportForm.errors.photoUrlTooLong');
+        return;
       }
 
       // AI 分析改由 server 喺案件建立後執行（見 App.tsx），前端唔可以自訂緊急度
@@ -287,9 +289,11 @@ export const ReportForm: React.FC<ReportFormProps> = ({
 
       const newReport: StrayReport = {
         id: reportId,
-        title: `${location.district || '待確認地區'} - ${
-          animalType === 'cat' ? '流浪貓' : animalType === 'dog' ? '流浪狗' : animalType === 'bird' ? '雀鳥' : '動物'
-        }通報`,
+        // 標題用報案人當時揀嘅語言；之後個案列表會改為顯示時即時砌出嚟
+        title: t('reportForm.caseTitle', {
+          district: districtOrPending(location.district),
+          animal: animalLabel(animalType, customAnimalName),
+        }),
         animalType,
         customAnimalName: customAnimalName.trim() || undefined,
         photoUrl: finalPhotoUrl,
@@ -309,49 +313,71 @@ export const ReportForm: React.FC<ReportFormProps> = ({
       };
 
       // 先確認 Firestore 寫入成功；AI 分析同確認信由 App.tsx 喺成功後先觸發
-      setStatusMessage('儲存緊個案，AI 分析緊傷勢…');
+      setStatusKey('reportForm.progress.saving');
       const saveSuccess = await onSubmitReport(newReport);
 
       if (!saveSuccess) {
-        setSubmitError('案件儲存失敗，請稍後再試一次。');
+        setSubmitErrorKey('reportForm.errors.saveFailed');
         return;
       }
     } catch (err: any) {
       console.error('Submit report error:', err);
-      setSubmitError(err?.message || '通報送出時發生問題，請檢查後重試。');
+      setSubmitErrorKey('reportForm.errors.submitFailed');
     } finally {
       setIsSubmitting(false);
-      setStatusMessage('');
+      setStatusKey(null);
       refreshCaptcha();
     }
   };
 
-  const animalLabel =
-    animalType === 'cat' ? '貓' : animalType === 'dog' ? '狗' : customAnimalName.trim() || '其他／雀鳥';
+  // 右欄摘要顯示嘅動物名
+  const selectedAnimalText =
+    animalType === 'other'
+      ? customAnimalName.trim() || t('reportForm.animal.other')
+      : t(`reportForm.animal.${animalType}`);
 
-  const checklist: { label: string; value: string; done: boolean }[] = [
-    { label: '動物', value: animalLabel, done: true },
-    { label: '相片', value: photoPreview ? '已加入' : '未加入', done: !!photoPreview },
-    { label: '位置', value: locationConfirmed ? location.address : '未確認', done: locationConfirmed },
-    { label: '現場狀況', value: description.trim() ? '已填寫' : '未填寫', done: !!description.trim() },
-    { label: '電郵', value: reporterEmail.trim() || '未填寫', done: !!reporterEmail.trim() },
+  const checklist: { id: string; label: string; value: string; done: boolean }[] = [
+    { id: 'animal', label: t('reportForm.checklist.animal'), value: selectedAnimalText, done: true },
+    {
+      id: 'photo',
+      label: t('reportForm.checklist.photo'),
+      value: photoPreview ? t('reportForm.checklist.added') : t('reportForm.checklist.notAdded'),
+      done: !!photoPreview,
+    },
+    {
+      id: 'location',
+      label: t('reportForm.checklist.location'),
+      value: locationConfirmed ? location.address : t('reportForm.checklist.notConfirmed'),
+      done: locationConfirmed,
+    },
+    {
+      id: 'description',
+      label: t('reportForm.checklist.description'),
+      value: description.trim() ? t('reportForm.checklist.filled') : t('reportForm.checklist.notFilled'),
+      done: !!description.trim(),
+    },
+    {
+      id: 'email',
+      label: t('reportForm.checklist.email'),
+      value: reporterEmail.trim() || t('reportForm.checklist.notFilled'),
+      done: !!reporterEmail.trim(),
+    },
   ];
+
+  const emergencyContact = getEmergencyContact();
 
   return (
     <div id="report-form-container">
-      <form
-        onSubmit={handleSubmit}
-        className="grid lg:grid-cols-[minmax(0,1fr)_340px] gap-8 lg:gap-12 items-start"
-      >
+      <form onSubmit={handleSubmit} className="grid lg:grid-cols-[minmax(0,1fr)_340px] gap-8 lg:gap-12 items-start">
         {/* 左欄：表單 */}
         <div>
-          <FormSection title="動物" hint="幫 NGO 預備合適嘅人手同工具">
+          <FormSection title={t('reportForm.animal.title')} hint={t('reportForm.animal.hint')}>
             <div className="grid grid-cols-3 gap-3 max-w-md">
               {([
-                ['cat', CatIcon, '貓'],
-                ['dog', DogIcon, '狗'],
-                ['other', BirdIcon, '其他／雀鳥'],
-              ] as const).map(([type, Icon, label]) => {
+                ['cat', CatIcon],
+                ['dog', DogIcon],
+                ['other', BirdIcon],
+              ] as const).map(([type, Icon]) => {
                 const selected = animalType === type;
                 return (
                   <button
@@ -365,12 +391,9 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                         : 'border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50'
                     }`}
                   >
-                    <Icon
-                      active={selected}
-                      className="w-14 h-14 text-stone-900 transition-transform group-hover:scale-105"
-                    />
+                    <Icon active={selected} className="w-14 h-14 text-stone-900 transition-transform group-hover:scale-105" />
                     <span className={`text-sm ${selected ? 'font-semibold text-stone-900' : 'text-stone-600'}`}>
-                      {label}
+                      {t(`reportForm.animal.${type}`)}
                     </span>
                   </button>
                 );
@@ -382,17 +405,13 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                 type="text"
                 value={customAnimalName}
                 onChange={(e) => setCustomAnimalName(e.target.value)}
-                placeholder="物種名稱（選填），例如：白鴿、八哥、刺蝟"
+                placeholder={t('reportForm.animal.customPlaceholder')}
                 className={`${inputClass} mt-3`}
               />
             )}
           </FormSection>
 
-          <FormSection
-            title="相片"
-            hint="影受傷位置或者成隻動物，相片會自動壓縮"
-            aside={<RequiredTag />}
-          >
+          <FormSection title={t('reportForm.photo.title')} hint={t('reportForm.photo.hint')} aside={<RequiredTag />}>
             <input
               type="file"
               ref={fileInputRef}
@@ -406,10 +425,10 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 className="w-28 h-28 rounded-xl overflow-hidden bg-stone-100 border border-stone-200 shrink-0 flex items-center justify-center text-stone-400 hover:bg-stone-200/60 transition-colors cursor-pointer"
-                aria-label="選擇相片"
+                aria-label={t('reportForm.photo.choose')}
               >
                 {photoPreview ? (
-                  <img src={photoPreview} alt="現場相片預覽" className="w-full h-full object-cover" />
+                  <img src={photoPreview} alt={t('reportForm.photo.previewAlt')} className="w-full h-full object-cover" />
                 ) : (
                   <Camera className="w-7 h-7 text-brand-400" strokeWidth={1.5} />
                 )}
@@ -422,7 +441,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                   className="px-4 py-2 rounded-lg bg-stone-900 hover:bg-black text-white text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer"
                 >
                   <Upload className="w-4 h-4" />
-                  {photoPreview ? '換一張相' : '選擇相片'}
+                  {photoPreview ? t('reportForm.photo.change') : t('reportForm.photo.choose')}
                 </button>
                 <button
                   type="button"
@@ -430,15 +449,15 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                   className="px-4 py-2 rounded-lg border border-stone-200 hover:bg-stone-50 text-stone-800 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer"
                 >
                   <Camera className="w-4 h-4 text-brand-500" />
-                  影相
+                  {t('reportForm.photo.take')}
                 </button>
               </div>
             </div>
           </FormSection>
 
           <FormSection
-            title="位置"
-            hint="用嚟配對附近嘅救助隊"
+            title={t('reportForm.location.title')}
+            hint={t('reportForm.location.hint')}
             aside={
               <button
                 type="button"
@@ -446,8 +465,12 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                 disabled={isGeolocating}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-stone-200 hover:bg-stone-50 text-xs font-medium transition-colors disabled:opacity-60 cursor-pointer"
               >
-                {isGeolocating ? <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-500" /> : <LocateFixed className="w-3.5 h-3.5 text-brand-500" />}
-                用 GPS 定位
+                {isGeolocating ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-500" />
+                ) : (
+                  <LocateFixed className="w-3.5 h-3.5 text-brand-500" />
+                )}
+                {t('reportForm.location.gps')}
               </button>
             }
           >
@@ -459,7 +482,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                   onSelect={handleSelectPlace}
                   onEnter={handleSearchManualAddress}
                   bias={locationConfirmed ? { lat: location.lat, lng: location.lng } : null}
-                  placeholder="輸入地址或地標，例如：旺角朗豪坊"
+                  placeholder={t('reportForm.location.placeholder')}
                 />
               </div>
               <button
@@ -469,7 +492,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                 className="px-4 rounded-lg bg-stone-900 hover:bg-black text-white text-sm font-medium flex items-center gap-1.5 transition-colors shrink-0 disabled:opacity-60 cursor-pointer"
               >
                 {isSearchingAddress ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                定位
+                {t('reportForm.location.locate')}
               </button>
             </div>
 
@@ -487,25 +510,29 @@ export const ReportForm: React.FC<ReportFormProps> = ({
             ) : (
               <p className="mt-3 flex items-center gap-1.5 text-xs text-stone-500">
                 <AlertCircle className="w-3.5 h-3.5 text-brand-500 shrink-0" />
-                未確認位置：撳「用 GPS 定位」，或者輸入地址再揀一個建議。
+                {t('reportForm.location.notConfirmed')}
               </p>
             )}
           </FormSection>
 
-          <FormSection title="現場狀況" hint="動物喺邊、有咩傷、精神狀態點" aside={<RequiredTag />}>
+          <FormSection
+            title={t('reportForm.description.title')}
+            hint={t('reportForm.description.hint')}
+            aside={<RequiredTag />}
+          >
             <textarea
               rows={4}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="例如：貓咪縮喺花槽，左腳唔敢落地；或者狗疑似俾車撞到，呼吸急促…"
+              placeholder={t('reportForm.description.placeholder')}
               className={`${inputClass} resize-y`}
               required
             />
           </FormSection>
 
           <FormSection
-            title="聯絡資料"
-            hint="唔會公開，只供管理員同救援機構聯絡你"
+            title={t('reportForm.contact.title')}
+            hint={t('reportForm.contact.hint')}
             aside={
               <label className="flex items-center gap-1.5 text-xs text-stone-700 font-medium cursor-pointer">
                 <input
@@ -514,15 +541,15 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                   onChange={(e) => setIsAnonymous(e.target.checked)}
                   className="rounded accent-brand-500"
                 />
-                匿名通報
+                {t('reportForm.contact.anonymous')}
               </label>
             }
           >
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-stone-700 mb-1.5">
-                  電郵 <span className="text-rose-600">*</span>
-                  <span className="ml-1.5 font-normal text-stone-400">接收確認信同追蹤連結</span>
+                  {t('reportForm.contact.email')} <span className="text-rose-600">*</span>
+                  <span className="ml-1.5 font-normal text-stone-400">{t('reportForm.contact.emailHint')}</span>
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-brand-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -540,22 +567,22 @@ export const ReportForm: React.FC<ReportFormProps> = ({
               {!isAnonymous && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-stone-700 mb-1.5">電話（選填）</label>
+                    <label className="block text-xs font-medium text-stone-700 mb-1.5">{t('reportForm.contact.phone')}</label>
                     <input
                       type="tel"
                       value={reporterPhone}
                       onChange={(e) => setReporterPhone(e.target.value)}
-                      placeholder="+852 9123 4567"
+                      placeholder={t('reportForm.contact.phonePlaceholder')}
                       className={inputClass}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-stone-700 mb-1.5">稱呼（選填）</label>
+                    <label className="block text-xs font-medium text-stone-700 mb-1.5">{t('reportForm.contact.name')}</label>
                     <input
                       type="text"
                       value={reporterName}
                       onChange={(e) => setReporterName(e.target.value)}
-                      placeholder="陳先生"
+                      placeholder={t('reportForm.contact.namePlaceholder')}
                       className={inputClass}
                     />
                   </div>
@@ -576,8 +603,8 @@ export const ReportForm: React.FC<ReportFormProps> = ({
           </div>
 
           <ul className="space-y-2.5">
-            {checklist.map(({ label, value, done }) => (
-              <li key={label} className="flex items-center gap-2.5 text-sm">
+            {checklist.map(({ id, label, value, done }) => (
+              <li key={id} className="flex items-center gap-2.5 text-sm">
                 {done ? (
                   <span className="w-4 h-4 rounded-full bg-brand-500 text-white flex items-center justify-center shrink-0">
                     <Check className="w-2.5 h-2.5" strokeWidth={3} />
@@ -592,7 +619,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
           </ul>
 
           <div className="pt-4 border-t border-stone-200">
-            <label className="block text-xs font-medium text-stone-700 mb-1.5">驗證碼</label>
+            <label className="block text-xs font-medium text-stone-700 mb-1.5">{t('reportForm.captcha.label')}</label>
             <div className="flex items-center gap-2">
               <div className="px-3 py-2 bg-stone-900 text-white font-mono font-bold tracking-widest text-sm rounded-lg select-none">
                 {captchaCode}
@@ -601,7 +628,8 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                 type="button"
                 onClick={refreshCaptcha}
                 className="p-2 rounded-lg hover:bg-stone-200 text-stone-500 transition-colors cursor-pointer"
-                title="換一個驗證碼"
+                title={t('reportForm.captcha.refresh')}
+                aria-label={t('reportForm.captcha.refresh')}
               >
                 <RefreshCw className="w-4 h-4 text-brand-500" />
               </button>
@@ -610,7 +638,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                 maxLength={4}
                 value={userCaptchaInput}
                 onChange={(e) => setUserCaptchaInput(e.target.value.toUpperCase())}
-                placeholder="輸入 4 位"
+                placeholder={t('reportForm.captcha.placeholder')}
                 className={`${inputClass} flex-1 min-w-0 uppercase font-mono text-center`}
                 required
               />
@@ -627,34 +655,37 @@ export const ReportForm: React.FC<ReportFormProps> = ({
               required
             />
             <label htmlFor="privacy-consent" className="text-2xs text-stone-500 leading-relaxed cursor-pointer">
-              本人同意提供上述資料，並明瞭：動物相片、發現位置及狀況描述會<strong className="text-stone-700">公開顯示</strong>於地圖及個案列表；
-              稱呼、電話及電郵<strong className="text-stone-700">不會公開</strong>，只供管理員及受委託救援機構聯絡之用；相片及描述會交由 Google Gemini AI 作初步分析。同時理解{' '}
-              <button
-                type="button"
-                onClick={() => setShowPrivacyModal(true)}
-                className="text-stone-900 font-medium underline underline-offset-2 cursor-pointer"
-              >
-                AI 傷病分診免責聲明與個人資料收集聲明 (PICS)
-              </button>
-              。
+              <Trans
+                i18nKey="reportForm.consent"
+                components={{
+                  b: <strong className="text-stone-700" />,
+                  link: (
+                    <button
+                      type="button"
+                      onClick={() => setShowPrivacyModal(true)}
+                      className="text-stone-900 font-medium underline underline-offset-2 cursor-pointer"
+                    />
+                  ),
+                }}
+              />
             </label>
           </div>
 
-          {submitError && (
+          {submitErrorKey && (
             <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{submitError}</span>
+              <span>{t(submitErrorKey)}</span>
             </div>
           )}
 
-          {statusMessage && (
+          {statusKey && (
             <div className="p-3 bg-white border border-stone-200 text-stone-700 rounded-lg text-xs flex items-center gap-2">
               {isSubmitting ? (
                 <Loader2 className="w-4 h-4 animate-spin shrink-0" />
               ) : (
                 <Check className="w-4 h-4 text-emerald-600 shrink-0" />
               )}
-              <span>{statusMessage}</span>
+              <span>{t(statusKey)}</span>
             </div>
           )}
 
@@ -667,11 +698,11 @@ export const ReportForm: React.FC<ReportFormProps> = ({
             {isSubmitting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                送出緊…
+                {t('reportForm.submitting')}
               </>
             ) : (
               <>
-                送出通報
+                {t('reportForm.submit')}
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
@@ -679,18 +710,19 @@ export const ReportForm: React.FC<ReportFormProps> = ({
         </aside>
       </form>
 
-      {/* PICS & AI Disclaimer Modal */}
+      {/* 私隱聲明及 AI 免責聲明 */}
       {showPrivacyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-stone-200 space-y-4 max-h-[85vh] overflow-y-auto text-xs text-stone-700">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-brand-600" />
-                <h3 className="font-bold text-sm text-stone-900">法律私隱與 AI 獸醫免責聲明</h3>
+                <h3 className="font-bold text-sm text-stone-900">{t('reportForm.modal.title')}</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowPrivacyModal(false)}
+                aria-label={t('reportForm.modal.close')}
                 className="text-stone-400 hover:text-stone-600 font-bold cursor-pointer"
               >
                 ✕
@@ -699,35 +731,33 @@ export const ReportForm: React.FC<ReportFormProps> = ({
 
             <div className="space-y-3 leading-relaxed">
               <div>
-                <h4 className="font-bold text-stone-900 mb-1">1. 收集個人資料聲明 (PICS)</h4>
-                <p>
-                  我們依照閣下所在地適用的個人資料保護法例（例如香港《個人資料（私隱）條例》、歐盟 GDPR）處理閣下的資料。
-                  稱呼、電話及電郵只用於本平台及受委託動物福利機構聯絡閣下、確認動物位置及跟進救援進度，不會公開，亦不會出售或用於商業推廣。
-                  動物相片、位置及描述會公開顯示，以便救援人員及義工協助；請避免拍攝人面、車牌或住宅門牌。相片及描述會傳送至 Google Gemini 作 AI 分析。
-                  如需查閱或刪除閣下的資料，請聯絡平台管理員。
-                </p>
+                <h4 className="font-bold text-stone-900 mb-1">{t('reportForm.modal.picsTitle')}</h4>
+                <p>{t('reportForm.modal.picsBody')}</p>
               </div>
 
               <div>
-                <h4 className="font-bold text-stone-900 mb-1">2. AI 傷病判斷免責條款</h4>
+                <h4 className="font-bold text-stone-900 mb-1">{t('reportForm.modal.aiTitle')}</h4>
                 <p>
-                  PawPulse 採用的 Google Gemini 多模態 AI 分析系統，旨在協助市民與搜救隊進行初步急診分診（P0/P1/P2）與裝備準備建議，<strong>絕非註冊獸醫之正式醫學診斷</strong>。
+                  <Trans i18nKey="reportForm.modal.aiBody" components={{ b: <strong /> }} />
                 </p>
               </div>
 
               <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-900">
                 <h4 className="font-bold mb-1 flex items-center gap-1.5">
                   <PhoneCall className="w-4 h-4 text-rose-600" />
-                  極度危急 (P0) 個案指引
+                  {t('reportForm.modal.p0Title')}
                 </h4>
                 <p className="text-2xs leading-relaxed">
-                  若動物出現大出血、被車撞昏迷、肢體嚴重骨折或呼吸困難，請勿等待應用程式回覆，
-                  {(() => {
-                    const c = getEmergencyContact();
-                    return c
-                      ? <>建議直接致電 {c.name} <strong>{c.phone}</strong> 尋求即時救助。</>
-                      : <>請直接聯絡當地動物救援機構、獸醫診所或警方。</>;
-                  })()}
+                  {t('reportForm.modal.p0Intro')}
+                  {emergencyContact ? (
+                    <Trans
+                      i18nKey="reportForm.modal.p0Call"
+                      values={{ name: emergencyContact.name, phone: emergencyContact.phone }}
+                      components={{ b: <strong /> }}
+                    />
+                  ) : (
+                    t('reportForm.modal.p0Local')
+                  )}
                 </p>
               </div>
             </div>
@@ -737,7 +767,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
               onClick={() => setShowPrivacyModal(false)}
               className="w-full py-2.5 rounded-xl bg-stone-900 text-white font-bold text-xs cursor-pointer"
             >
-              我已理解並關閉
+              {t('reportForm.modal.understood')}
             </button>
           </div>
         </div>

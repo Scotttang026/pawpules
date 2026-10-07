@@ -1,3 +1,4 @@
+import i18n from 'i18next';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../firebase';
 
@@ -9,6 +10,26 @@ const API_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '
 
 const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|bmp|avif|heic|heif)$/i;
 const HEIC_RE = /(image\/hei[cf])|(\.(heic|heif)$)/i;
+
+type PhotoErrorKey =
+  | 'photo.invalidType'
+  | 'photo.tooLarge'
+  | 'photo.decodeFailed'
+  | 'photo.heicFailed'
+  | 'photo.canvasFailed'
+  | 'photo.compressFailed'
+  | 'photo.readFailed'
+  | 'photo.empty'
+  | 'photo.badCaseId'
+  | 'photo.uploadFailed';
+
+/** 帶翻譯 key 嘅錯誤；message 係當時語言嘅文字，key 可俾 UI 再翻譯 */
+export class PhotoError extends Error {
+  constructor(public readonly key: PhotoErrorKey) {
+    super(i18n.t(key));
+    this.name = 'PhotoError';
+  }
+}
 
 function looksLikeImage(file: File): boolean {
   return file.type.startsWith('image/') || IMAGE_EXT_RE.test(file.name);
@@ -36,7 +57,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error('讀取壓縮後圖片失敗'));
+    reader.onerror = () => reject(new PhotoError('photo.readFailed'));
     reader.readAsDataURL(blob);
   });
 }
@@ -53,10 +74,10 @@ export async function compressImage(
   quality = 0.82
 ): Promise<{ blob: Blob; dataUrl: string }> {
   if (!looksLikeImage(file)) {
-    throw new Error('請上傳有效的圖片檔案（JPG、PNG、WebP、HEIC）');
+    throw new PhotoError('photo.invalidType');
   }
   if (file.size > MAX_INPUT_FILE_SIZE_BYTES) {
-    throw new Error('圖片檔案過大（上限 20MB），請選擇較小的照片。');
+    throw new PhotoError('photo.tooLarge');
   }
 
   let decoded: { img: HTMLImageElement; url: string };
@@ -64,14 +85,14 @@ export async function compressImage(
     decoded = await decodeImage(file);
   } catch {
     if (!isHeic(file)) {
-      throw new Error('解析圖片失敗，檔案可能已損毀或格式不支援');
+      throw new PhotoError('photo.decodeFailed');
     }
     try {
       const { default: heic2any } = await import('heic2any');
       const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
       decoded = await decodeImage(Array.isArray(out) ? out[0] : out);
     } catch {
-      throw new Error('呢張 HEIC 相片未能轉換。可喺 iPhone「設定 > 相機 > 格式」揀「最兼容」，或截圖後再上載。');
+      throw new PhotoError('photo.heicFailed');
     }
   }
 
@@ -85,7 +106,7 @@ export async function compressImage(
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('無法初始化圖片壓縮畫布');
+    if (!ctx) throw new PhotoError('photo.canvasFailed');
 
     // 先填白色背景，避免 PNG 透明部分轉做 JPEG 後變黑
     ctx.fillStyle = '#ffffff';
@@ -95,7 +116,7 @@ export async function compressImage(
 
     const blob = await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('圖片壓縮轉換失敗'))),
+        (b) => (b ? resolve(b) : reject(new PhotoError('photo.compressFailed'))),
         'image/jpeg',
         quality
       )
@@ -123,11 +144,11 @@ export async function uploadAnimalPhoto(
   fallbackDataUrl?: string
 ): Promise<PhotoUploadResult> {
   if (!blob || blob.size === 0) {
-    throw new Error('照片資料為空，請重新選擇照片。');
+    throw new PhotoError('photo.empty');
   }
 
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(caseId)) {
-    throw new Error('案件編號格式不正確，請重新提交。');
+    throw new PhotoError('photo.badCaseId');
   }
   const safeCaseId = caseId;
   // 檔名必須等於案件編號，firestore.rules 會核對相片屬於呢宗案件
@@ -147,7 +168,7 @@ export async function uploadAnimalPhoto(
     if (downloadUrl && downloadUrl.length <= MAX_FIRESTORE_URL_LENGTH) {
       return { downloadUrl, storagePath };
     }
-    console.warn('Firebase Storage 返回嘅連結長度超出 Firestore 限制，改用伺服器 proxy。');
+    console.warn('Storage download URL exceeds Firestore limit, falling back to server proxy.');
   } catch (storageError) {
     console.warn('Direct Firebase Storage upload failed, attempting server upload proxy:', storageError);
   }
@@ -169,14 +190,14 @@ export async function uploadAnimalPhoto(
             storagePath: typeof result?.storagePath === 'string' ? result.storagePath : storagePath,
           };
         }
-        console.warn('伺服器 proxy 返回嘅連結格式無效或過長。');
+        console.warn('Server proxy returned an invalid or too-long URL.');
       } else {
-        console.warn(`伺服器 proxy 回應 HTTP ${response.status}。`);
+        console.warn(`Server proxy responded with HTTP ${response.status}.`);
       }
     } catch (proxyError) {
       console.warn('Server upload fallback failed:', proxyError);
     }
   }
 
-  throw new Error('照片上傳失敗，請檢查網絡連線後重新選擇照片再試一次。');
+  throw new PhotoError('photo.uploadFailed');
 }

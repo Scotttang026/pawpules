@@ -1,4 +1,5 @@
 import { getBrowserLanguage } from './locale';
+import i18n from 'i18next';
 
 export interface PresetLocation {
   name: string;
@@ -61,7 +62,7 @@ export function getGoogleMapsDirectionsUrl(destLat: number, destLng: number, ori
  */
 export async function reverseGeocodeCoords(lat: number, lng: number): Promise<{ address: string; district?: string }> {
   if (!isValidCoordinate(lat, lng)) {
-    return { address: '無效座標', district: '待確認地區' };
+    return { address: i18n.t('location.invalidCoords'), district: i18n.t('location.unknownDistrict') };
   }
 
   try {
@@ -70,7 +71,7 @@ export async function reverseGeocodeCoords(lat: number, lng: number): Promise<{ 
     if (res.ok) {
       const data = await res.json();
       if (data && typeof data.address === 'string') {
-        return { address: data.address, district: data.district || '待確認地區' };
+        return { address: data.address, district: data.district || i18n.t('location.unknownDistrict') };
       }
     }
   } catch (err) {
@@ -78,10 +79,11 @@ export async function reverseGeocodeCoords(lat: number, lng: number): Promise<{ 
   }
 
   return {
-    address: `經緯度座標 (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
-    district: '待確認地區',
+    address: i18n.t('location.coordsFallback', { lat: lat.toFixed(4), lng: lng.toFixed(4) }),
+    district: i18n.t('location.unknownDistrict'),
   };
 }
+
 
 /**
  * 地址文字 → 座標 + 區名（跟瀏覽器語言）。經伺服器 /api/geocode。

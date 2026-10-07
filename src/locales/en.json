@@ -1,0 +1,378 @@
+{
+  "nav": {
+    "report": "Report",
+    "map": "Map",
+    "cases": "Cases",
+    "ngos": "NGOs",
+    "admin": "Admin",
+    "guide": "Guide",
+    "login": "Login",
+    "logout": "Logout",
+    "language": "Language",
+    "adminActive": "Admin access active",
+    "loginWithGoogle": "Sign in with Google",
+    "clickToLogout": "click to sign out"
+  },
+  "animal": {
+    "cat": "Cat",
+    "dog": "Dog",
+    "bird": "Bird",
+    "other": "Other animal"
+  },
+  "status": {
+    "pending": "Pending",
+    "in_progress": "In Progress",
+    "rescued": "Rescued",
+    "closed": "Closed"
+  },
+  "urgency": {
+    "P0": "Critical",
+    "P1": "Needs medical attention",
+    "P2": "Stable"
+  },
+  "reportForm": {
+    "required": "Required",
+    "submit": "Submit report",
+    "submitting": "Submitting…",
+    "caseTitle": "{{animal}} report – {{district}}",
+    "animal": {
+      "title": "Animal",
+      "hint": "Helps NGOs bring the right people and equipment",
+      "cat": "Cat",
+      "dog": "Dog",
+      "other": "Other / Bird",
+      "customPlaceholder": "Species (optional), e.g. pigeon, myna, hedgehog"
+    },
+    "photo": {
+      "title": "Photo",
+      "hint": "Photograph the injury or the whole animal. Photos are compressed automatically",
+      "choose": "Choose photo",
+      "change": "Change photo",
+      "take": "Take photo",
+      "previewAlt": "Photo preview"
+    },
+    "location": {
+      "title": "Location",
+      "hint": "Used to match nearby rescue teams",
+      "gps": "Use GPS",
+      "locate": "Locate",
+      "placeholder": "Enter an address or landmark, e.g. Langham Place, Mong Kok",
+      "notConfirmed": "Location not confirmed: tap “Use GPS”, or enter an address and pick a suggestion.",
+      "districtPending": "Area to be confirmed"
+    },
+    "description": {
+      "title": "Situation",
+      "hint": "Where the animal is, any injuries, how alert it seems",
+      "placeholder": "e.g. A cat is hiding in a planter and won’t put weight on its left leg; or a dog may have been hit by a car and is breathing fast…"
+    },
+    "contact": {
+      "title": "Contact details",
+      "hint": "Not made public. Only admins and rescue organisations use these to contact you",
+      "anonymous": "Report anonymously",
+      "email": "Email",
+      "emailHint": "For your confirmation email and tracking link",
+      "phone": "Phone (optional)",
+      "phonePlaceholder": "+852 9123 4567",
+      "name": "Name (optional)",
+      "namePlaceholder": "Mr Chan"
+    },
+    "checklist": {
+      "animal": "Animal",
+      "photo": "Photo",
+      "location": "Location",
+      "description": "Situation",
+      "email": "Email",
+      "added": "Added",
+      "notAdded": "Not added",
+      "notConfirmed": "Not confirmed",
+      "filled": "Filled in",
+      "notFilled": "Not filled in"
+    },
+    "captcha": {
+      "label": "Verification code",
+      "refresh": "Get a new code",
+      "placeholder": "4 characters"
+    },
+    "consent": "I agree to provide the information above and understand that the animal photo, location and description will be <b>shown publicly</b> on the map and case list; my name, phone and email will <b>not be made public</b> and are used only by admins and appointed rescue organisations to contact me; the photo and description will be sent to Google Gemini AI for an initial analysis. I have also read the <link>AI triage disclaimer and Personal Information Collection Statement (PICS)</link>.",
+    "progress": {
+      "compressing": "Compressing photo…",
+      "photoReady": "✓ Photo ready",
+      "gpsLocating": "Finding your location by GPS…",
+      "gpsSuccess": "✓ Location found",
+      "gpsNoAddress": "Got GPS coordinates but couldn’t find the address. Please enter it manually",
+      "gpsDenied": "Location permission was not granted. Please enter the address manually",
+      "gpsFailed": "GPS failed. Please enter the address manually",
+      "searching": "Searching for the address…",
+      "found": "✓ Address found",
+      "notFound": "Address not found. Pick one from the suggestions, or tap “Use GPS”.",
+      "searchUnavailable": "Address search is unavailable right now. Please try again later, or tap “Use GPS”.",
+      "preparing": "Preparing your report…",
+      "uploading": "Uploading photo…",
+      "saving": "Saving your report and analysing injuries with AI…"
+    },
+    "errors": {
+      "noPhoto": "Please upload or take a photo of the animal first",
+      "noDescription": "Please describe the animal’s situation",
+      "noLocation": "Please confirm the location first: tap “Use GPS”, or pick a suggested address.",
+      "badPhone": "Invalid phone number. Use digits only, optionally with a country code, e.g. +852 9123 4567",
+      "badCaptcha": "Incorrect verification code. Please try again.",
+      "noConsent": "Please read and accept the privacy statement and AI triage disclaimer.",
+      "noGeolocation": "Your device or browser doesn’t support location services",
+      "photoProcessFailed": "Couldn’t process this photo. Please try another one",
+      "photoUrlTooLong": "The photo didn’t finish uploading. Please choose the photo again and retry.",
+      "saveFailed": "Couldn’t save the report. Please try again later.",
+      "submitFailed": "Something went wrong while submitting. Please check your connection and try again."
+    },
+    "modal": {
+      "title": "Privacy and AI Veterinary Disclaimer",
+      "close": "Close",
+      "picsTitle": "1. Personal Information Collection Statement (PICS)",
+      "picsBody": "We handle your data in line with the data protection laws that apply where you are (for example, Hong Kong’s Personal Data (Privacy) Ordinance or the EU GDPR). Your name, phone and email are used only by this platform and appointed animal welfare organisations to contact you, confirm the animal’s location and follow up on the rescue. They are never made public, sold or used for marketing. The animal photo, location and description are shown publicly so that rescuers and volunteers can help; please avoid capturing people’s faces, licence plates or house numbers. The photo and description are sent to Google Gemini for AI analysis. To access or delete your data, please contact the platform administrator.",
+      "aiTitle": "2. AI Triage Disclaimer",
+      "aiBody": "PawPulse uses Google Gemini multimodal AI to help citizens and rescue teams with initial triage (P0/P1/P2) and equipment suggestions. <b>It is not a formal diagnosis by a registered veterinarian</b>.",
+      "p0Title": "Critical (P0) cases",
+      "p0Intro": "If the animal is bleeding heavily, unconscious after being hit by a vehicle, has a severe fracture or is struggling to breathe, do not wait for a reply from the app. ",
+      "p0Call": "Call {{name}} directly at <b>{{phone}}</b> for immediate help.",
+      "p0Local": "Contact a local animal rescue organisation, a vet clinic or the police directly.",
+      "understood": "I understand"
+    }
+  },
+  "cases": {
+    "title": "Reported Cases",
+    "filterAll": "All Cases",
+    "filterUrgent": "Urgent Only"
+  },
+  "emergency": {
+    "hkSpca": "SPCA 24-hour hotline",
+    "callContact": "Call {{name}} directly at {{phone}}",
+    "contactLocal": "Please contact a local animal rescue organisation or the police directly"
+  },
+  "common": {
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "loading": "Loading...",
+    "error": "An error occurred, please try again later"
+  },
+    "addressSearch": {
+    "placeholder": "Enter an address, building or landmark, e.g. Langham Place, Mong Kok",
+    "suggestError": "Address suggestions are unavailable right now. You can still type the address and tap “Locate”.",
+    "resolveError": "Couldn't get coordinates for this address. Please pick it again or tap “Locate”.",
+    "poweredBy": "Powered by Google",
+    "joinParts": "{{main}}, {{secondary}}",
+    "labelWithName": "{{name}} ({{address}})"
+  },
+  "photo": {
+    "invalidType": "Please upload a valid image file (JPG, PNG, WebP, HEIC).",
+    "tooLarge": "The image is too large (max 20 MB). Please choose a smaller photo.",
+    "decodeFailed": "Couldn't read the image. The file may be damaged or in an unsupported format.",
+    "heicFailed": "This HEIC photo couldn't be converted. On iPhone, go to Settings > Camera > Formats and choose “Most Compatible”, or take a screenshot and upload that instead.",
+    "canvasFailed": "Couldn't initialise the image compressor.",
+    "compressFailed": "Image compression failed.",
+    "readFailed": "Couldn't read the compressed image.",
+    "empty": "The photo is empty. Please choose the photo again.",
+    "badCaseId": "Invalid case ID. Please submit again.",
+    "uploadFailed": "Photo upload failed. Please check your connection, choose the photo again and retry."
+  },
+  "app": {
+    "pageMeta": {
+      "report": { "title": "Report", "subtitle": "Upload a photo — AI assesses injuries and matches nearby NGOs" },
+      "map": { "title": "Rescue map", "subtitle": "Live view of open cases (P0 critical / P1 medical / P2 stable) and NGO locations" },
+      "cases": { "title": "Cases", "subtitle": "{{count}} cases · live sync" },
+      "ngos": { "title": "Partners", "subtitle": "{{count}} rescue organisations and hotlines" },
+      "admin": { "title": "Admin", "subtitle": "Case dispatch, NGO capacity and system logs" }
+    },
+    "urgentBadge": "{{count}} P0 critical",
+    "newReport": "New report",
+    "close": "Close",
+    "submitFailed": "Your report could not be saved. Please check your connection and try again. If it's an emergency, {{hint}}.",
+    "emailSent": "Confirmation sent: the tracking link for case <code>#{{caseId}}</code> was emailed to <strong>{{email}}</strong>.",
+    "successTitle": "Report submitted · {{id}}",
+    "successWithAi": "Photo saved, AI injury assessment complete, and nearby NGOs matched.",
+    "successNoAi": "Photo saved and nearby NGOs matched.",
+    "viewOnMap": "View on map",
+    "reportAnother": "Report another case",
+    "aiNoResponseTitle": "No response from Gemini",
+    "aiNoResponseBody": "AI injury analysis is unavailable. Your case has been saved and matched with nearby rescue teams.",
+    "caseNotFound": "Case #{{id}} was not found. It may have been deleted or the link is incorrect.",
+    "statusUpdateFailed": "Status update failed (permission or network issue). Changes have been reverted.",
+    "deleteFailed": "Delete failed, possibly due to insufficient permissions. The case has been restored.",
+    "ngoCreateFailed": "Failed to add NGO, possibly due to insufficient permissions.",
+    "ngoDeleteFailed": "Failed to delete NGO, possibly due to insufficient permissions.",
+    "dispatchFailed": "Failed to notify the NGO. Please try again later or call the NGO hotline directly.",
+    "footerName": "PawPulse · Real-time stray animal reporting & rescue matching",
+    "footerPrivacy": "We handle reporter data in accordance with applicable personal data protection laws. For serious road accidents or animals in critical condition, {{hint}}."
+  },
+    "location": {
+    "invalidCoords": "Invalid coordinates",
+    "unknownDistrict": "District unconfirmed",
+    "coordsFallback": "Coordinates ({{lat}}, {{lng}})"
+  },
+  "caseFeed": {
+    "searchPlaceholder": "Search by place (e.g. Mong Kok, Sha Tin), breed or injury...",
+    "all": "All",
+    "allCount": "All ({{n}})",
+    "urgencyFilter": "Urgency:",
+    "statusFilter": "Status:",
+    "emptyTitle": "No reports yet",
+    "emptyBody": "All case data and photos sync in real time. New reports will appear here as soon as they're submitted.",
+    "noMatchTitle": "No cases match your filters",
+    "noMatchBody": "Try adjusting the filters or clearing your search",
+    "aiBreed": "AI assessment: {{breed}}",
+    "unknown": "Unknown",
+    "topMatch": "Top match: ",
+    "distance": "~{{km}} km",
+    "distanceUnknown": "Distance unknown",
+    "viewOnMap": "View on map",
+    "details": "Details"
+  },
+  "aiCard": {
+    "urgency": {
+      "P0": { "label": "P0 - Critical", "sub": "Life-threatening / suspected road accident / shock / needs emergency care now" },
+      "P1": { "label": "P1 - Needs medical care", "sub": "Fracture / open wound / kitten or puppy / severe infection or weakness" },
+      "P2": { "label": "P2 - Stable", "sub": "No immediate danger / lost pet / needs shelter and microchip scan" }
+    },
+    "compactTitle": "AI summary",
+    "title": "Google Gemini multimodal AI injury assessment",
+    "confidence": "({{pct}}% confidence)",
+    "analyzedAt": "Analysed at {{time}}",
+    "unknownTime": "Unknown time",
+    "species": "Species",
+    "unknownSpecies": "Unknown species",
+    "breed": "Estimated breed & coat",
+    "unknown": "Unknown",
+    "appearance": "Appearance: ",
+    "reasonTitle": "Why this urgency level",
+    "noReason": "No assessment details",
+    "injuries": "Detected injuries / abnormalities ({{n}})",
+    "noInjuries": "No obvious abnormalities detected.",
+    "equipment": "Suggested equipment for the NGO team",
+    "noEquipment": "No special equipment suggested.",
+    "firstAid": "On-site guidance for the reporter (while waiting for rescue)",
+    "noFirstAid": "No specific guidance. Please follow general animal first-aid practice.",
+    "precautions": "Safety precautions: ",
+    "listSeparator": "; "
+  },
+    "caseModal": {
+    "caseBadge": "{{level}} case",
+    "copyLinkTitle": "Copy this case's tracking link",
+    "linkCopied": "Link copied",
+    "shareLink": "Share tracking link",
+    "copyManually": "Please copy the link manually: {{url}}",
+    "confirmDelete": "Admin confirmation: permanently delete case #{{id}}?",
+    "deleteTitle": "Delete case (admin)",
+    "close": "Close",
+    "location": "Reported location:",
+    "reporter": "Reporter: ",
+    "loading": "Loading...",
+    "defaultReporter": "Concerned citizen",
+    "contactProtectedTitle": "Reporter contact details are protected and visible to admins only",
+    "contactProtected": "Reporter contact details are protected (visible to the rescue coordination team only)",
+    "description": "Reporter's description:",
+    "statusTitle": "Rescue status (live sync):",
+    "adminCanChange": "Admins can change this",
+    "adminOnly": "(only admins can change the status)",
+    "tabAi": "🧠 Google Gemini AI injury report",
+    "tabNgos": "🏥 Matched NGOs & feedback ({{n}})",
+    "aiNoResponseTitle": "No response from Gemini",
+    "aiNoResponseBody": "AI injury analysis is unavailable. Please act according to the situation on site.",
+    "navigate": "Open Google Maps directions",
+    "closeView": "Close"
+  },
+  "ngoMatch": {
+    "headerTitle": "Nearby NGOs matched automatically ({{n}} recommended)",
+    "headerSub": "Matched by species ({{animal}}), urgency ({{urgency}}) and distance",
+    "liveDistance": "Live distance",
+    "empty": "No NGOs matched automatically. Please call an emergency hotline directly.",
+    "topMatch": "Best match",
+    "emergency24h": "24h emergency response",
+    "matchScore": "{{pct}}% match",
+    "distance": "~{{km}} km away",
+    "driveTime": "~{{mins}} min drive",
+    "baseAddress": "Address: ",
+    "hours": "Hours: {{hours}}",
+    "call": "Call {{phone}}",
+    "whatsappHelp": "WhatsApp for help",
+    "routeTitle": "View route on Google Maps",
+    "route": "Directions",
+    "dispatchedAdmin": "Report sent to NGO (case accepted)",
+    "dispatchedPublic": "NGO notified, waiting for the rescue team to confirm",
+    "dispatching": "Sending...",
+    "dispatch": "Send report + AI assessment",
+    "lifeThreat": "If the animal's life is in immediate danger (e.g. heavy bleeding, not breathing), call the hotline above right away.",
+    "whatsapp": {
+      "header": "[PawPulse stray animal rescue request]",
+      "caseId": "Case ID: {{id}}",
+      "animal": "Animal: {{animal}}",
+      "urgency": "Urgency: {{urgency}}",
+      "location": "Location: {{address}}",
+      "phone": "Reporter phone: {{phone}}",
+      "tracking": "Case tracking link: {{url}}",
+      "animalNames": { "cat": "Cat", "dog": "Dog", "bird": "Bird", "other": "Animal" }
+    }
+  },
+    "guide": {
+    "title": "On-site first aid guide",
+    "subtitle": "What to do first when you find a stray or injured animal",
+    "close": "Close",
+    "safetyTitle": "Your safety first",
+    "safetyBody": "Injured, frightened or pained animals may bite or scratch by instinct, even if they are normally gentle. Never pry open their mouth or pick them up by force!",
+    "doTitle": "Do",
+    "dontTitle": "Don't",
+    "do": {
+      "watch": { "title": "Stay nearby: ", "body": "Watch from a safe distance (2–3 m) so the animal doesn't panic and run into traffic or a drain." },
+      "warm": { "title": "Keep it warm: ", "body": "In cold weather or if the animal has lost blood, cover it with a clean blanket or jacket." },
+      "report": { "title": "Photograph & report: ", "body": "Report with PawPulse so AI can assess injuries and match nearby NGOs." },
+      "water": { "title": "A little water: ", "body": "Only if the animal is alert and can lower its head by itself, offer a small amount of room-temperature water. Never force it." }
+    },
+    "dont": {
+      "move": { "title": "Don't move it unnecessarily: ", "body": "After a suspected road accident, moving the spine or pelvis can cause nerve damage or fatal internal bleeding." },
+      "feed": { "title": "Don't give human food or milk: ", "body": "Many cats and dogs are lactose intolerant, and food in the stomach can cause choking if emergency anaesthesia is needed." },
+      "meds": { "title": "Don't give medication: ", "body": "Human painkillers (e.g. paracetamol) are toxic to cats and dogs and especially deadly to cats. Don't apply creams either — the animal may lick them off." },
+      "crowd": { "title": "Don't crowd around: ", "body": "Crowds increase stress and may trigger shock or a desperate escape." }
+    },
+    "hotlineTitle": "24-hour animal emergency hotline",
+    "hotlineNone": "We don't have a verified hotline for your area yet. Please contact a local animal rescue organisation or the nearest vet.",
+    "ack": "Got it"
+  },
+  "map": {
+    "allSpecies": "All species",
+    "allLevels": "All levels",
+    "urgencyShort": { "P0": "P0 Critical", "P1": "P1 Medical", "P2": "P2 Stable" },
+    "showNgos": "Show rescue organisations (NGOs)",
+    "empty": "No open cases on the map yet",
+    "popupHotline": "Hotline: ",
+    "navigate": "Navigate in Google Maps",
+    "photoAlt": "Case photo",
+    "viewFull": "View full assessment & matches",
+    "close": "Close"
+  },
+  "ngoDir": {
+    "badge": "PawPulse partner NGO database (live sync)",
+    "title": "Partner rescue organisations & hotlines ({{n}})",
+    "subtitle": "Rescue organisations with live case capacity and 24-hour emergency contacts.",
+    "searchPlaceholder": "Search by name, district (e.g. Yuen Long, Wan Chai) or service...",
+    "allAnimals": "All animals",
+    "catSpecialty": "Cats",
+    "dogSpecialty": "Dogs",
+    "only24h": "🚨 24-hour hotlines only",
+    "emptyTitle": "No NGOs registered yet",
+    "emptyBody": "Platform admins can add and manage partner organisations in the Admin panel.",
+    "noMatchTitle": "No organisations match your filters",
+    "noMatchBody": "Try clearing your search",
+    "rescue24h": "24h response",
+    "hours": "Hours: {{hours}}",
+    "call": "Call rescue team",
+    "adminCapacity": "Admin: case capacity"
+  },
+  "capacity": {
+    "available": "Accepting cases",
+    "busy": "Busy",
+    "full": "Not accepting",
+    "short": { "available": "Normal", "busy": "Busy", "full": "Paused" }
+  },
+  "meta": {
+    "title": "PawPulse - Real-time Stray Animal Reporting & AI Rescue Matching",
+    "description": "Report stray animals in real time. AI helps assess injuries and matches nearby rescue organisations."
+  }
+
+}

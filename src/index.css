@@ -30,3 +30,18 @@ body {
   background-color: var(--color-stone-100);
   -webkit-font-smoothing: antialiased;
 }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* iPhone Safari：輸入框字體細過 16px 會自動放大，手機版強制 16px */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+

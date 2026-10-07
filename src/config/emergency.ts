@@ -1,4 +1,5 @@
-import { getBrowserLanguage } from '../utils/locale'; // ⚠️ 換成你 locale.ts 實際 export 嘅函數名
+import i18n from '../i18n';
+import { getBrowserRegion } from '../utils/locale';
 
 export interface EmergencyContact {
   name: string;
@@ -6,26 +7,24 @@ export interface EmergencyContact {
 }
 
 // ⚠️ 只加入你親自核實過嘅號碼，唔好估。打錯緊急熱線比冇熱線更危險。
-const CONTACTS: Record<string, EmergencyContact> = {
-  HK: { name: 'SPCA 24 小時熱線', phone: '2711 1000' },
+// nameKey 對應 locales/*.json 入面嘅翻譯
+const CONTACTS: Record<string, { nameKey: string; phone: string }> = {
+  HK: { nameKey: 'emergency.hkSpca', phone: '2711 1000' },
 };
 
 export function getRegionCode(): string | null {
-  try {
-    return new Intl.Locale(getBrowserLanguage()).region ?? null;
-  } catch {
-    return null;
-  }
+  return getBrowserRegion();
 }
 
 export function getEmergencyContact(): EmergencyContact | null {
   const region = getRegionCode();
-  return region ? CONTACTS[region] ?? null : null;
+  const c = region ? CONTACTS[region] : undefined;
+  return c ? { name: i18n.t(c.nameKey), phone: c.phone } : null;
 }
 
 export function getEmergencyHint(): string {
   const c = getEmergencyContact();
-  return c ? `請直接致電 ${c.name} ${c.phone}` : '請直接聯絡當地動物救援機構或警方';
+  return c ? i18n.t('emergency.callContact', { name: c.name, phone: c.phone }) : i18n.t('emergency.contactLocal');
 }
 
 export function telHref(phone: string): string {

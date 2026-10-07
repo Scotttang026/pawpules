@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MapPin, Loader2 } from 'lucide-react';
 import {
   fetchAddressSuggestions,
@@ -15,9 +16,16 @@ interface Props {
   /** 冇揀建議、直接撳 Enter 時觸發（例如沿用舊有「定位」搜尋） */
   onEnter?: () => void;
   bias?: { lat: number; lng: number } | null;
+  /** 唔傳就用翻譯檔嘅預設提示字 */
   placeholder?: string;
   disabled?: boolean;
 }
+
+// 儲 key 唔儲字，咁轉語言時錯誤訊息都會即刻跟住轉
+type ErrorKey = 'addressSearch.suggestError' | 'addressSearch.resolveError';
+
+// 地址係純文字顯示，唔需要 HTML escape（否則 "&" 會變 "&amp;"）
+const NO_ESCAPE = { interpolation: { escapeValue: false } } as const;
 
 export default function AddressAutocomplete({
   value,
@@ -25,15 +33,16 @@ export default function AddressAutocomplete({
   onSelect,
   onEnter,
   bias,
-  placeholder = '輸入地址、大廈或地標，例如：旺角朗豪坊',
+  placeholder,
   disabled,
 }: Props) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState(''); // 只喺用戶真正打完字先更新（避開輸入法組字）
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
-  const [error, setError] = useState<string | null>(null);
+  const [errorKey, setErrorKey] = useState<ErrorKey | null>(null);
 
   const composingRef = useRef(false);
   const sessionRef = useRef(newSessionToken());
@@ -52,7 +61,7 @@ export default function AddressAutocomplete({
     const ctrl = new AbortController();
     const timer = window.setTimeout(async () => {
       setLoading(true);
-      setError(null);
+      setErrorKey(null);
       try {
         const list = await fetchAddressSuggestions(q, sessionRef.current, ctrl.signal, bias ?? undefined);
         setSuggestions(list);
@@ -61,7 +70,7 @@ export default function AddressAutocomplete({
       } catch (e) {
         if ((e as Error).name === 'AbortError') return;
         setSuggestions([]);
-        setError('地址建議暫時無法載入，你仍可直接輸入地址再撳「定位」。');
+        setErrorKey('addressSearch.suggestError');
         setOpen(true);
       } finally {
         if (!ctrl.signal.aborted) setLoading(false);
@@ -77,19 +86,23 @@ export default function AddressAutocomplete({
   const handleSelect = async (s: AddressSuggestion) => {
     setOpen(false);
     setSuggestions([]);
-    onChange(s.secondaryText ? `${s.mainText}，${s.secondaryText}` : s.mainText);
+    onChange(
+      s.secondaryText
+        ? t('addressSearch.joinParts', { main: s.mainText, secondary: s.secondaryText, ...NO_ESCAPE })
+        : s.mainText
+    );
     setLoading(true);
-    setError(null);
+    setErrorKey(null);
     try {
       const place = await resolveAddress(s.placeId, sessionRef.current);
       const label =
         place.name && !place.address.includes(place.name)
-          ? `${place.name}（${place.address}）`
+          ? t('addressSearch.labelWithName', { name: place.name, address: place.address, ...NO_ESCAPE })
           : place.address || s.mainText;
       onChange(label);
       onSelect({ ...place, address: label });
     } catch {
-      setError('未能取得此地址嘅座標，請再揀一次或撳「定位」。');
+      setErrorKey('addressSearch.resolveError');
       setOpen(true);
     } finally {
       setLoading(false);
@@ -133,7 +146,7 @@ export default function AddressAutocomplete({
         enterKeyHint="search"
         value={value}
         disabled={disabled}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t('addressSearch.placeholder')}
         maxLength={200}
         className="w-full pl-9 pr-9 py-2.5 text-sm bg-white border border-stone-200 rounded-lg placeholder:text-stone-400 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 transition-shadow"
         onChange={(e) => {
@@ -158,13 +171,13 @@ export default function AddressAutocomplete({
         <Loader2 className="w-4 h-4 text-stone-400 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
       )}
 
-      {open && (suggestions.length > 0 || error) && (
+      {open && (suggestions.length > 0 || errorKey) && (
         <ul
           id="address-suggestion-list"
           role="listbox"
           className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-stone-200 bg-white shadow-lg"
         >
-          {error && <li className="px-4 py-3 text-xs text-rose-600">{error}</li>}
+          {errorKey && <li className="px-4 py-3 text-xs text-rose-600">{t(errorKey)}</li>}
           {suggestions.map((s, i) => (
             <li
               key={s.placeId}
@@ -179,7 +192,7 @@ export default function AddressAutocomplete({
             </li>
           ))}
           {suggestions.length > 0 && (
-            <li className="px-4 py-1.5 text-right text-3xs text-stone-400">資料來源：Google</li>
+            <li className="px-4 py-1.5 text-right text-3xs text-stone-400">{t('addressSearch.poweredBy')}</li>
           )}
         </ul>
       )}

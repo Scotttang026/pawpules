@@ -700,6 +700,13 @@ function cleanList(v: unknown, maxItems = 8, maxLen = 200): string[] {
     : [];
 }
 
+function languageForPrompt(lang: string): string {
+  const l = lang.toLowerCase();
+  if (l.startsWith("zh")) return "Traditional Chinese (standard written Chinese as used in Hong Kong)";
+  if (l.startsWith("en")) return "English";
+  return `the language identified by the BCP 47 tag "${lang}"`;
+}
+
 async function runGeminiAnalysis(
   imageBase64: string,
   animalType: unknown,
@@ -729,7 +736,7 @@ User provided context:
 ${safeDescription}
 """
 
-Write every text field in the language identified by the BCP 47 tag "${lang}". If you cannot write that language, use Traditional Chinese.
+Write every text field in ${languageForPrompt(lang)}. If you cannot write that language, use Traditional Chinese.
 1. Identify species and estimate breed / physical features.
 2. Carefully inspect visible signs of physical trauma, injuries, wounds, fractures, dehydration, skin diseases, eye infections, posture.
 3. Assign an urgency triage level based on what is VISIBLE in the photo (the description may support but must not override clear visual evidence):

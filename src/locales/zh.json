@@ -1,0 +1,377 @@
+{
+    "nav": {
+        "report": "通報",
+        "map": "地圖",
+        "cases": "個案",
+        "ngos": "機構",
+        "admin": "後台",
+        "guide": "應急",
+        "login": "登入",
+        "logout": "登出",
+        "language": "語言",
+        "adminActive": "管理員權限生效中",
+        "loginWithGoogle": "用 Google 登入",
+        "clickToLogout": "按此登出"
+    },
+    "animal": {
+        "cat": "貓",
+        "dog": "狗",
+        "bird": "雀鳥",
+        "other": "其他動物"
+    },
+    "status": {
+        "pending": "待處理",
+        "in_progress": "跟進中",
+        "rescued": "已救援",
+        "closed": "已結案"
+    },
+    "urgency": {
+        "P0": "極度危急",
+        "P1": "需要醫療關注",
+        "P2": "情況穩定"
+    },
+    "reportForm": {
+        "required": "必填",
+        "submit": "送出通報",
+        "submitting": "送出緊…",
+        "caseTitle": "{{district}} - {{animal}}通報",
+        "animal": {
+        "title": "動物",
+        "hint": "幫 NGO 預備合適嘅人手同工具",
+        "cat": "貓",
+        "dog": "狗",
+        "other": "其他／雀鳥",
+        "customPlaceholder": "物種名稱（選填），例如：白鴿、八哥、刺蝟"
+        },
+        "photo": {
+        "title": "相片",
+        "hint": "影受傷位置或者成隻動物，相片會自動壓縮",
+        "choose": "選擇相片",
+        "change": "換一張相",
+        "take": "影相",
+        "previewAlt": "現場相片預覽"
+        },
+        "location": {
+        "title": "位置",
+        "hint": "用嚟配對附近嘅救助隊",
+        "gps": "用 GPS 定位",
+        "locate": "定位",
+        "placeholder": "輸入地址或地標，例如：旺角朗豪坊",
+        "notConfirmed": "未確認位置：撳「用 GPS 定位」，或者輸入地址再揀一個建議。",
+        "districtPending": "待確認地區"
+        },
+        "description": {
+        "title": "現場狀況",
+        "hint": "動物喺邊、有咩傷、精神狀態點",
+        "placeholder": "例如：貓咪縮喺花槽，左腳唔敢落地；或者狗疑似俾車撞到，呼吸急促…"
+        },
+        "contact": {
+        "title": "聯絡資料",
+        "hint": "唔會公開，只供管理員同救援機構聯絡你",
+        "anonymous": "匿名通報",
+        "email": "電郵",
+        "emailHint": "接收確認信同追蹤連結",
+        "phone": "電話（選填）",
+        "phonePlaceholder": "+852 9123 4567",
+        "name": "稱呼（選填）",
+        "namePlaceholder": "陳先生"
+        },
+        "checklist": {
+        "animal": "動物",
+        "photo": "相片",
+        "location": "位置",
+        "description": "現場狀況",
+        "email": "電郵",
+        "added": "已加入",
+        "notAdded": "未加入",
+        "notConfirmed": "未確認",
+        "filled": "已填寫",
+        "notFilled": "未填寫"
+        },
+        "captcha": {
+        "label": "驗證碼",
+        "refresh": "換一個驗證碼",
+        "placeholder": "輸入 4 位"
+        },
+        "consent": "本人同意提供上述資料，並明瞭：動物相片、發現位置及狀況描述會<b>公開顯示</b>於地圖及個案列表；稱呼、電話及電郵<b>不會公開</b>，只供管理員及受委託救援機構聯絡之用；相片及描述會交由 Google Gemini AI 作初步分析。同時理解<link>AI 傷病分診免責聲明與個人資料收集聲明 (PICS)</link>。",
+        "progress": {
+        "compressing": "壓縮緊相片…",
+        "photoReady": "✓ 相片已準備好",
+        "gpsLocating": "正在透過 GPS 定位目前位置…",
+        "gpsSuccess": "✓ GPS 定位成功",
+        "gpsNoAddress": "已取得 GPS 座標，但未能轉換成地址，請手動輸入地址",
+        "gpsDenied": "你未允許定位權限，請手動輸入地址",
+        "gpsFailed": "GPS 定位失敗，請手動輸入地址",
+        "searching": "正在搜尋地址…",
+        "found": "✓ 已找到地址位置",
+        "notFound": "搵唔到呢個地址，請喺建議清單揀一個地址，或者撳「用 GPS 定位」。",
+        "searchUnavailable": "地址搜尋暫時無法使用，請稍後再試，或者撳「用 GPS 定位」。",
+        "preparing": "準備緊資料…",
+        "uploading": "上傳緊相片…",
+        "saving": "儲存緊個案，AI 分析緊傷勢…"
+        },
+        "errors": {
+        "noPhoto": "請先上傳或者影一張動物現場相片",
+        "noDescription": "請填寫現場動物狀況",
+        "noLocation": "請先確認發現位置：撳「用 GPS 定位」，或者喺地址欄揀一個建議地址。",
+        "badPhone": "電話格式不正確，請只輸入數字，可以加國家區號，例如 +852 9123 4567",
+        "badCaptcha": "驗證碼不正確，請重新輸入。",
+        "noConsent": "請先閱讀並勾選同意私隱聲明及 AI 分診免責條款。",
+        "noGeolocation": "你嘅裝置或者瀏覽器唔支援定位",
+        "photoProcessFailed": "相片處理失敗，請換一張相再試",
+        "photoUrlTooLong": "相片未上傳完成，請重新揀相片再試一次。",
+        "saveFailed": "案件儲存失敗，請稍後再試一次。",
+        "submitFailed": "通報送出時發生問題，請檢查網絡之後再試。"
+        },
+        "modal": {
+        "title": "法律私隱與 AI 獸醫免責聲明",
+        "close": "關閉",
+        "picsTitle": "1. 收集個人資料聲明 (PICS)",
+        "picsBody": "我們依照閣下所在地適用的個人資料保護法例（例如香港《個人資料（私隱）條例》、歐盟 GDPR）處理閣下的資料。稱呼、電話及電郵只用於本平台及受委託動物福利機構聯絡閣下、確認動物位置及跟進救援進度，不會公開，亦不會出售或用於商業推廣。動物相片、位置及描述會公開顯示，以便救援人員及義工協助；請避免拍攝人面、車牌或住宅門牌。相片及描述會傳送至 Google Gemini 作 AI 分析。如需查閱或刪除閣下的資料，請聯絡平台管理員。",
+        "aiTitle": "2. AI 傷病判斷免責條款",
+        "aiBody": "PawPulse 採用的 Google Gemini 多模態 AI 分析系統，旨在協助市民與搜救隊進行初步急診分診（P0/P1/P2）與裝備準備建議，<b>絕非註冊獸醫之正式醫學診斷</b>。",
+        "p0Title": "極度危急 (P0) 個案指引",
+        "p0Intro": "若動物出現大出血、被車撞昏迷、肢體嚴重骨折或呼吸困難，請勿等待應用程式回覆，",
+        "p0Call": "建議直接致電 {{name}} <b>{{phone}}</b> 尋求即時救助。",
+        "p0Local": "請直接聯絡當地動物救援機構、獸醫診所或警方。",
+        "understood": "我已理解並關閉"
+        }
+    },
+    "cases": {
+        "title": "通報個案列表",
+        "filterAll": "全部個案",
+        "filterUrgent": "僅顯示緊急"
+    },
+    "emergency": {
+        "hkSpca": "SPCA 24 小時熱線",
+        "callContact": "請直接致電 {{name}} {{phone}}",
+        "contactLocal": "請直接聯絡當地動物救援機構或警方"
+    },
+    "common": {
+        "confirm": "確認",
+        "cancel": "取消",
+        "loading": "載入中...",
+        "error": "發生錯誤，請稍後再試"
+    },
+    "addressSearch": {
+        "placeholder": "輸入地址、大廈或地標，例如：旺角朗豪坊",
+        "suggestError": "地址建議暫時無法載入，你仍可直接輸入地址再撳「定位」。",
+        "resolveError": "未能取得此地址嘅座標，請再揀一次或撳「定位」。",
+        "poweredBy": "資料來源：Google",
+        "joinParts": "{{main}}，{{secondary}}",
+        "labelWithName": "{{name}}（{{address}}）"
+    },
+    "photo": {
+        "invalidType": "請上傳有效的圖片檔案（JPG、PNG、WebP、HEIC）",
+        "tooLarge": "圖片檔案過大（上限 20MB），請選擇較小的照片。",
+        "decodeFailed": "解析圖片失敗，檔案可能已損毀或格式不支援",
+        "heicFailed": "呢張 HEIC 相片未能轉換。可喺 iPhone「設定 > 相機 > 格式」揀「最兼容」，或截圖後再上載。",
+        "canvasFailed": "無法初始化圖片壓縮畫布",
+        "compressFailed": "圖片壓縮轉換失敗",
+        "readFailed": "讀取壓縮後圖片失敗",
+        "empty": "照片資料為空，請重新選擇照片。",
+        "badCaseId": "案件編號格式不正確，請重新提交。",
+        "uploadFailed": "照片上傳失敗，請檢查網絡連線後重新選擇照片再試一次。"
+    },
+    "app": {
+        "pageMeta": {
+        "report": { "title": "我要通報", "subtitle": "影相上載，AI 即時評估傷勢並配對附近 NGO" },
+        "map": { "title": "救援地圖", "subtitle": "即時顯示待救援個案（P0 危急／P1 醫療／P2 穩定）同 NGO 位置" },
+        "cases": { "title": "個案動態", "subtitle": "共 {{count}} 宗 · 實時同步" },
+        "ngos": { "title": "合作機構", "subtitle": "{{count}} 間救助機構及熱線" },
+        "admin": { "title": "後台管理", "subtitle": "個案調度、NGO 容量同系統紀錄" }
+        },
+        "urgentBadge": "{{count}} 宗 P0 危急",
+        "newReport": "新通報",
+        "close": "關閉",
+        "submitFailed": "通報提交失敗，個案尚未成功儲存。請檢查網絡連線後重試；如情況危急，{{hint}}。",
+        "emailSent": "確認信已寄出：個案 <code>#{{caseId}}</code> 嘅追蹤連結已寄去 <strong>{{email}}</strong>。",
+        "successTitle": "通報成功 · {{id}}",
+        "successWithAi": "相片已儲存，AI 已完成傷勢評估，並配對咗附近合適嘅 NGO。",
+        "successNoAi": "相片已儲存，並配對咗附近合適嘅 NGO。",
+        "viewOnMap": "喺地圖睇位置",
+        "reportAnother": "通報新個案",
+        "aiNoResponseTitle": "Gemini 冇回應",
+        "aiNoResponseBody": "未能取得 AI 傷勢分析，個案已經儲存，並直接配對附近救助隊。",
+        "caseNotFound": "搵唔到案件 #{{id}}，可能已被刪除或連結有誤。",
+        "statusUpdateFailed": "狀態更新失敗，可能因為權限不足或網絡問題，畫面已還原。",
+        "deleteFailed": "刪除失敗，可能因為權限不足，個案已還原。",
+        "ngoCreateFailed": "新增 NGO 失敗，可能因為權限不足。",
+        "ngoDeleteFailed": "刪除 NGO 失敗，可能因為權限不足。",
+        "dispatchFailed": "通知 NGO 失敗，請稍後再試或直接致電 NGO 熱線。",
+        "footerName": "PawPulse · 流浪動物即時通報與救助媒合",
+        "footerPrivacy": "我哋按適用嘅個人資料保護法例處理通報者資料。若遇嚴重車禍或瀕危動物，{{hint}}。"
+    },
+    "location": {
+        "invalidCoords": "無效座標",
+        "unknownDistrict": "待確認地區",
+        "coordsFallback": "經緯度座標 ({{lat}}, {{lng}})"
+    },
+    "caseFeed": {
+        "searchPlaceholder": "搜尋地點（如：旺角、沙田）、品種、或傷勢描述...",
+        "all": "全部",
+        "allCount": "全部 ({{n}})",
+        "urgencyFilter": "緊急等級：",
+        "statusFilter": "狀態：",
+        "emptyTitle": "目前暫無任何通報個案",
+        "emptyBody": "所有個案資料與相片即時同步。一旦有市民通報，會即刻喺呢度顯示。",
+        "noMatchTitle": "沒有符合篩選條件的個案",
+        "noMatchBody": "可以試吓調整篩選器或者重設搜尋關鍵字",
+        "aiBreed": "AI 診斷：{{breed}}",
+        "unknown": "未知",
+        "topMatch": "媒合首選：",
+        "distance": "約 {{km}} km",
+        "distanceUnknown": "未知距離",
+        "viewOnMap": "在地圖檢視",
+        "details": "詳情"
+    },
+    "aiCard": {
+        "urgency": {
+            "P0": { "label": "P0 - 極度危急", "sub": "生命危險／疑似嚴重車禍／休克／需即刻急診救助" },
+            "P1": { "label": "P1 - 需醫療關注", "sub": "骨折／開放外傷／幼貓幼犬／嚴重感染虛弱" },
+            "P2": { "label": "P2 - 情況穩定", "sub": "無立即危險／親人走失／需收容安置與晶片掃描" }
+            },
+            "compactTitle": "AI 診斷簡報",
+            "title": "Google Gemini 多模態 AI 傷病判斷報告",
+            "confidence": "(信心度 {{pct}}%)",
+            "analyzedAt": "分析時間：{{time}}",
+            "unknownTime": "未知時間",
+            "species": "辨識物種",
+            "unknownSpecies": "未知物種",
+            "breed": "推測品種與毛色",
+            "unknown": "未知",
+            "appearance": "體態特徵：",
+            "reasonTitle": "緊急度評定原因",
+            "noReason": "暫無評估說明",
+            "injuries": "初步檢測傷病／異常跡象 ({{n}})",
+            "noInjuries": "未偵測到明顯異常跡象。",
+            "equipment": "建議 NGO 救助隊準備裝備",
+            "noEquipment": "暫無特別裝備建議。",
+            "firstAid": "通報市民現場應急守則（等待救援期間）",
+            "noFirstAid": "暫無現場應急建議，請依一般動物救助常識處理。",
+            "precautions": "安全禁忌與防護提示：",
+            "listSeparator": "；"
+    },
+    "caseModal": {
+        "caseBadge": "{{level}} 案件",
+        "copyLinkTitle": "複製案件專屬追蹤連結",
+        "linkCopied": "已複製連結",
+        "shareLink": "分享追蹤連結",
+        "copyManually": "請手動複製連結：{{url}}",
+        "confirmDelete": "管理員確認：確定要永久刪除個案 #{{id}}？",
+        "deleteTitle": "管理員刪除個案",
+        "close": "關閉",
+        "location": "通報精確地點：",
+        "reporter": "通報人：",
+        "loading": "載入中...",
+        "defaultReporter": "熱心市民",
+        "contactProtectedTitle": "報案人聯絡資料已受保護，僅供管理員查看",
+        "contactProtected": "通報人聯絡資料已受保護（僅供救援協調團隊查看）",
+        "description": "市民狀況說明：",
+        "statusTitle": "救援進度狀態（即時同步）：",
+        "adminCanChange": "管理員可任意變更",
+        "adminOnly": "（僅管理員可變更狀態）",
+        "tabAi": "🧠 Google Gemini AI 傷病分析報告",
+        "tabNgos": "🏥 媒合 NGO 與通報回饋 ({{n}})",
+        "aiNoResponseTitle": "Gemini 沒有回應",
+        "aiNoResponseBody": "未能取得 AI 傷勢分析報告，請依照現場實際狀況進行救助。",
+        "navigate": "開啟 Google Maps 現場導航",
+        "closeView": "關閉檢視"
+    },
+    "ngoMatch": {
+        "headerTitle": "自動媒合鄰近 NGO 機構（{{n}} 間推薦）",
+        "headerSub": "依據動物物種（{{animal}}）、緊急等級（{{urgency}}）及距離智慧配對",
+        "liveDistance": "即時算距",
+        "empty": "暫無自動媒合的 NGO 機構，請直接致電緊急熱線。",
+        "topMatch": "最佳匹配首選",
+        "emergency24h": "24h 緊急出車",
+        "matchScore": "匹配度 {{pct}}%",
+        "distance": "距離約 {{km}} km",
+        "driveTime": "車程約 {{mins}} 分鐘",
+        "baseAddress": "基地地址：",
+        "hours": "服務時間：{{hours}}",
+        "call": "致電 {{phone}}",
+        "whatsappHelp": "WhatsApp 求助",
+        "routeTitle": "在 Google Maps 查看路線",
+        "route": "導航路線",
+        "dispatchedAdmin": "已向機構送交通報（已接案）",
+        "dispatchedPublic": "已通知機構，等候救援隊確認接案",
+        "dispatching": "派送中...",
+        "dispatch": "送交通報 + AI 報告",
+        "lifeThreat": "若動物目前正處於嚴重生命威脅（如大出血、呼吸停止），請立即直接撥打上方熱線進行緊急口頭回報。",
+        "whatsapp": {
+        "header": "【PawPulse 流浪動物通報求助】",
+        "caseId": "個案編號: {{id}}",
+        "animal": "動物: {{animal}}",
+        "urgency": "緊急度: {{urgency}}",
+        "location": "地點: {{address}}",
+        "phone": "通報人電話: {{phone}}",
+        "tracking": "案件追蹤連結: {{url}}",
+        "animalNames": { "cat": "貓", "dog": "狗", "bird": "鳥", "other": "動物" }
+        }
+    },
+    "guide": {
+        "title": "市民現場救護應急指南",
+        "subtitle": "遇見流浪／受傷動物時嘅第一時間處置守則",
+        "close": "關閉",
+        "safetyTitle": "自身安全第一",
+        "safetyBody": "受傷、極度疼痛或受驚嘅動物，即使平時溫馴，亦可能出於本能咬人或抓傷。切勿徒手扳開口鼻或強行抱起！",
+        "doTitle": "建議採取嘅行動",
+        "dontTitle": "切勿採取嘅危險行為",
+        "do": {
+        "watch": { "title": "守護現場：", "body": "喺安全距離（2–3 米）持續觀察，避免動物受驚逃入車道或深溝。" },
+        "warm": { "title": "保暖防風：", "body": "天氣寒冷或動物失血體溫下降時，可用乾淨毛毯或外套覆蓋其身軀。" },
+        "report": { "title": "拍照通報：", "body": "用 PawPulse 拍照通報，等 AI 即時評估傷勢並配對附近 NGO。" },
+        "water": { "title": "少量清水：", "body": "只喺動物清醒而且可以自己低頭時，提供少量常溫水，切勿強灌。" }
+        },
+        "dont": {
+        "move": { "title": "切勿隨意翻動：", "body": "疑似車禍撞擊嘅動物，搬動脊椎或盆骨可能造成神經受損或致命內出血。" },
+        "feed": { "title": "切勿餵人食或牛奶：", "body": "好多貓狗有乳糖不耐；如果需要緊急麻醉手術，胃內食物會引致嘔吐窒息。" },
+        "meds": { "title": "切勿自行用藥：", "body": "人類止痛藥（例如撲熱息痛）對貓狗有毒，對貓尤其致命；亦唔好自行塗藥膏，動物舔食可能中毒。" },
+        "crowd": { "title": "切勿圍觀喧嘩：", "body": "太多人圍住會加劇動物壓力，可能引發休克或拚死逃走。" }
+        },
+        "hotlineTitle": "24 小時動物緊急救援熱線",
+        "hotlineNone": "暫時未有你所在地區已核實嘅熱線。請聯絡當地動物救援機構或就近獸醫。",
+        "ack": "我已知悉"
+    },
+    "map": {
+        "allSpecies": "全部物種",
+        "allLevels": "所有等級",
+        "urgencyShort": { "P0": "P0 危急", "P1": "P1 醫療", "P2": "P2 穩定" },
+        "showNgos": "顯示救助機構 (NGO)",
+        "empty": "目前尚無待救援個案標記",
+        "popupHotline": "救助專線：",
+        "navigate": "在 Google 地圖導航",
+        "photoAlt": "個案照片",
+        "viewFull": "檢視完整診斷及媒合",
+        "close": "關閉"
+    },
+    "ngoDir": {
+        "badge": "PawPulse 合作 NGO 救助資料庫（即時同步）",
+        "title": "合作動物救助機構與熱線名錄（{{n}} 間）",
+        "subtitle": "收錄救助組織，顯示即時接案狀態及 24 小時緊急聯絡。",
+        "searchPlaceholder": "搜尋機構名稱、區域（如：元朗、灣仔）、或專責服務...",
+        "allAnimals": "全部動物",
+        "catSpecialty": "貓咪專長",
+        "dogSpecialty": "犬隻專長",
+        "only24h": "🚨 僅顯示 24 小時熱線",
+        "emptyTitle": "尚未登記任何 NGO 機構",
+        "emptyBody": "平台管理員可於「後台管理」新增並維護合作救援機構。",
+        "noMatchTitle": "沒有符合篩選條件的機構",
+        "noMatchBody": "可以試吓清除搜尋關鍵字",
+        "rescue24h": "24h 出車",
+        "hours": "服務時間：{{hours}}",
+        "call": "致電救助隊",
+        "adminCapacity": "管理員調度接案量："
+    },
+    "capacity": {
+        "available": "正常接案",
+        "busy": "救援繁重",
+        "full": "暫停收案",
+        "short": { "available": "正常", "busy": "繁重", "full": "暫停" }
+    },
+    "meta": {
+        "title": "PawPulse - 流浪動物即時通報與 AI 救助媒合平台",
+        "description": "流浪動物即時通報與 AI 智慧救援媒合平台，快速辨識傷病狀況並自動配對鄰近合適 NGO。"
+    }
+}
