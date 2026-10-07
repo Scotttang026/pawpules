@@ -38,6 +38,11 @@ export function docToReport(id: string, data: DocumentData): StrayReport | null 
     customAnimalName: data.customAnimalName || undefined,
     photoUrl: data.photoUrl || '',
     storagePath: data.storagePath || '',
+      photos: Array.isArray(data.photos)
+    ? data.photos
+        .filter((p: any) => p && typeof p.url === 'string' && typeof p.path === 'string')
+        .map((p: any) => ({ url: p.url, path: p.path }))
+    : undefined,
     location: { lat: loc.lat, lng: loc.lng, address: loc.address || '', district: loc.district },
     description: data.description || '',
     reporterName: '',
@@ -102,6 +107,8 @@ export async function createCaseInFirestore(report: StrayReport): Promise<void> 
       customAnimalName: report.customAnimalName || '',
       photoUrl: report.photoUrl,
       storagePath: report.storagePath || '',
+          // Firestore 唔接受 undefined，冇相就成個欄位唔寫
+    ...(report.photos?.length ? { photos: report.photos.map(({ url, path }) => ({ url, path })) } : {}),
       location: report.location,
       description: report.description,
       createdAt: serverTimestamp(),

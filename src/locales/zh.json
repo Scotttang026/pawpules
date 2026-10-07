@@ -45,11 +45,18 @@
         },
         "photo": {
         "title": "相片",
-        "hint": "影受傷位置或者成隻動物，相片會自動壓縮",
         "choose": "選擇相片",
         "change": "換一張相",
         "take": "影相",
-        "previewAlt": "現場相片預覽"
+        "previewAlt": "現場相片預覽",
+        "hint": "最多 {{max}} 張，可以由唔同角度影。第 1 張會做封面，喺個案列表同地圖顯示。",
+        "add": "加相",
+        "remove": "刪除呢張相",
+        "cover": "封面",
+        "setCover": "設為封面",
+        "count": "{{n}} / {{max}} 張",
+        "limitReached": "最多只可以上傳 {{max}} 張相，多出嘅相已略過。",
+        "thumbAlt": "相片 {{n}}"
         },
         "location": {
         "title": "位置",
@@ -86,7 +93,8 @@
         "notAdded": "未加入",
         "notConfirmed": "未確認",
         "filled": "已填寫",
-        "notFilled": "未填寫"
+        "notFilled": "未填寫",
+        "photoCount": "{{n}} 張"
         },
         "captcha": {
         "label": "驗證碼",
@@ -108,7 +116,8 @@
         "searchUnavailable": "地址搜尋暫時無法使用，請稍後再試，或者撳「用 GPS 定位」。",
         "preparing": "準備緊資料…",
         "uploading": "上傳緊相片…",
-        "saving": "儲存緊個案，AI 分析緊傷勢…"
+        "saving": "儲存緊個案，AI 分析緊傷勢…",
+        "uploadingN": "上傳相片中（{{done}}/{{total}}）…"
         },
         "errors": {
         "noPhoto": "請先上傳或者影一張動物現場相片",
@@ -276,7 +285,15 @@
         "aiNoResponseTitle": "Gemini 沒有回應",
         "aiNoResponseBody": "未能取得 AI 傷勢分析報告，請依照現場實際狀況進行救助。",
         "navigate": "開啟 Google Maps 現場導航",
-        "closeView": "關閉檢視"
+        "closeView": "關閉檢視",
+        "gallery": {
+            "prev": "上一張",
+            "next": "下一張",
+            "counter": "{{n}} / {{total}}",
+            "photoAlt": "{{title}} – 相片 {{n}}",
+            "noPhoto": "冇相片",
+            "goTo": "睇第 {{n}} 張"
+        }
     },
     "ngoMatch": {
         "headerTitle": "自動媒合鄰近 NGO 機構（{{n}} 間推薦）",

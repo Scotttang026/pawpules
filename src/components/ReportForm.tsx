@@ -1,17 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
-import { AnimalType, LocationCoords, StrayReport, NGOOrganization } from '../types';
+import { AnimalType, LocationCoords, StrayReport, NGOOrganization, CasePhoto } from '../types';
 import { PRESET_LOCATIONS, geocodeAddressQuery, reverseGeocodeCoords } from '../utils/location';
 import AddressAutocomplete from './AddressAutocomplete';
 import { CatIcon, DogIcon, BirdIcon } from './AnimalIcons';
 import type { ResolvedAddress } from '../services/places';
-import { compressImage, uploadAnimalPhoto } from '../utils/imageCompressor';
+import { compressImage, uploadCasePhotos, PhotoError } from '../utils/imageCompressor';
+import { MAX_CASE_PHOTOS } from '../utils/casePhotos';
 import { rankFirestoreNGOs } from '../services/caseService';
 import { animalLabel } from '../utils/caseLabels';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Camera,
-  Upload,
+  ImagePlus,
+  Plus,
+  X,
+  Star,
   MapPin,
   LocateFixed,
   Search,
@@ -33,6 +37,16 @@ interface ReportFormProps {
   onSubmitReport: (newReport: StrayReport) => Promise<boolean>;
   onAnalysisStart?: () => void;
 }
+
+// 未上傳嘅相：blob 用嚟上傳，dataUrl 用嚟預覽同做後備上傳
+interface PendingPhoto {
+  id: string;
+  blob: Blob;
+  dataUrl: string;
+}
+
+let photoSeq = 0;
+const nextPhotoId = () => `p${Date.now().toString(36)}-${photoSeq++}`;
 
 const inputClass =
   'w-full px-3 py-2.5 text-sm bg-white border border-stone-200 rounded-lg placeholder:text-stone-400 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 transition-shadow';
@@ -70,8 +84,9 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
   const { user } = useAuth();
   const [animalType, setAnimalType] = useState<AnimalType>('cat');
   const [customAnimalName, setCustomAnimalName] = useState('');
-  const [photoPreview, setPhotoPreview] = useState<string>('');
-  const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
+  // 多張相：第 0 張係封面
+  const [photos, setPhotos] = useState<PendingPhoto[]>([]);
+  const [isProcessingPhotos, setIsProcessingPhotos] = useState(false);
   const [description, setDescription] = useState('');
 
   // Reporter details & Anti-abuse
@@ -91,6 +106,10 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
   // 儲存翻譯 key 而唔係文字，咁中途轉語言都會即刻跟住轉
   const [submitErrorKey, setSubmitErrorKey] = useState<string | null>(null);
   const [statusKey, setStatusKey] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const busy = isSubmitting || isProcessingPhotos;
+  const canAddMore = photos.length < MAX_CASE_PHOTOS;
 
   const refreshCaptcha = () => {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -124,26 +143,52 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
   const [locationConfirmed, setLocationConfirmed] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null); // 相簿（可以揀多張）
+  const cameraInputRef = useRef<HTMLInputElement>(null); // 相機（一次一張）
 
   const districtOrPending = (d?: string) => d || t('reportForm.location.districtPending');
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // 相簿同相機共用：逐張壓縮（HEIC 轉換好食資源，唔好同時做）
+  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const files: File[] = input.files ? Array.from(input.files) : [];
+    input.value = ''; // 清空，咁先可以再揀同一張相
+    if (files.length === 0) return;
 
-    try {
-      setStatusKey('reportForm.progress.compressing');
-      const { blob, dataUrl } = await compressImage(file, 1280, 1280, 0.82);
-      setPhotoPreview(dataUrl);
-      setPhotoBlob(blob);
-      setStatusKey('reportForm.progress.photoReady');
-    } catch (err: any) {
-      console.warn('Image processing failed:', err?.message || err);
-      alert(t('reportForm.errors.photoProcessFailed'));
-      setStatusKey(null);
+    const room = MAX_CASE_PHOTOS - photos.length;
+    if (room <= 0 || files.length > room) {
+      alert(t('reportForm.photo.limitReached', { max: MAX_CASE_PHOTOS }));
+      if (room <= 0) return;
     }
+
+    setIsProcessingPhotos(true);
+    setStatusKey('reportForm.progress.compressing');
+    const added: PendingPhoto[] = [];
+    let failed = 0;
+
+    for (const file of files.slice(0, room)) {
+      try {
+        const { blob, dataUrl } = await compressImage(file, 1280, 1280, 0.82);
+        added.push({ id: nextPhotoId(), blob, dataUrl });
+      } catch (err: any) {
+        console.warn('Image processing failed:', err?.message || err);
+        failed++;
+      }
+    }
+
+    setPhotos((prev) => [...prev, ...added].slice(0, MAX_CASE_PHOTOS));
+    setIsProcessingPhotos(false);
+    setStatusKey(added.length > 0 ? 'reportForm.progress.photoReady' : null);
+    if (failed > 0) alert(t('reportForm.errors.photoProcessFailed'));
   };
+
+  const removePhoto = (id: string) => setPhotos((prev) => prev.filter((p) => p.id !== id));
+
+  const makeCover = (id: string) =>
+    setPhotos((prev) => {
+      const hit = prev.find((p) => p.id === id);
+      return hit ? [hit, ...prev.filter((p) => p.id !== id)] : prev;
+    });
 
   const handleGetCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -220,7 +265,9 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
     e.preventDefault();
     setSubmitErrorKey(null);
 
-    if (!photoBlob && !photoPreview) {
+    if (isProcessingPhotos) return;
+
+    if (photos.length === 0) {
       alert(t('reportForm.errors.noPhoto'));
       return;
     }
@@ -263,18 +310,12 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
         .slice(2, 6)
         .toUpperCase()}`;
 
-      let finalPhotoUrl = photoPreview;
-      let finalStoragePath = `animal-reports/${reportId}.jpg`;
+      setStatusKey('reportForm.progress.uploadingN');
+      const uploaded = await uploadCasePhotos(photos, reportId, (done, total) => setUploadProgress({ done, total }));
+      const casePhotos: CasePhoto[] = uploaded.map((u) => ({ url: u.downloadUrl, path: u.storagePath }));
 
-      if (photoBlob) {
-        setStatusKey('reportForm.progress.uploading');
-        const uploadResult = await uploadAnimalPhoto(photoBlob, reportId, photoPreview);
-        finalPhotoUrl = uploadResult.downloadUrl;
-        finalStoragePath = uploadResult.storagePath;
-      }
-
-      // firestore.rules 限制 photoUrl 長度上限 2048；如果仲係 base64 dataURL 代表上傳未完成
-      if (finalPhotoUrl.length > 2048) {
+      // firestore.rules 限制每個網址最長 2048
+      if (casePhotos.length === 0 || casePhotos.some((p) => p.url.length > 2048)) {
         setSubmitErrorKey('reportForm.errors.photoUrlTooLong');
         return;
       }
@@ -296,8 +337,10 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
         }),
         animalType,
         customAnimalName: customAnimalName.trim() || undefined,
-        photoUrl: finalPhotoUrl,
-        storagePath: finalStoragePath,
+        // 封面 = 第 1 張；firestore.rules 會核對 photoUrl / storagePath 等於 photos[0]
+        photoUrl: casePhotos[0].url,
+        storagePath: casePhotos[0].path,
+        photos: casePhotos,
         location,
         description: description.trim(),
         reporterName: effectiveReporterName,
@@ -322,10 +365,11 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
       }
     } catch (err: any) {
       console.error('Submit report error:', err);
-      setSubmitErrorKey('reportForm.errors.submitFailed');
+      setSubmitErrorKey(err instanceof PhotoError ? err.key : 'reportForm.errors.submitFailed');
     } finally {
       setIsSubmitting(false);
       setStatusKey(null);
+      setUploadProgress(null);
       refreshCaptcha();
     }
   };
@@ -341,8 +385,8 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
     {
       id: 'photo',
       label: t('reportForm.checklist.photo'),
-      value: photoPreview ? t('reportForm.checklist.added') : t('reportForm.checklist.notAdded'),
-      done: !!photoPreview,
+      value: photos.length > 0 ? t('reportForm.checklist.photoCount', { n: photos.length }) : t('reportForm.checklist.notAdded'),
+      done: photos.length > 0,
     },
     {
       id: 'location',
@@ -365,6 +409,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
   ];
 
   const emergencyContact = getEmergencyContact();
+  const cover = photos[0];
 
   return (
     <div id="report-form-container">
@@ -411,47 +456,122 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
             )}
           </FormSection>
 
-          <FormSection title={t('reportForm.photo.title')} hint={t('reportForm.photo.hint')} aside={<RequiredTag />}>
+          <FormSection
+            title={t('reportForm.photo.title')}
+            hint={t('reportForm.photo.hint', { max: MAX_CASE_PHOTOS })}
+            aside={<RequiredTag />}
+          >
+            {/* 相簿：可以一次揀多張 */}
             <input
               type="file"
               ref={fileInputRef}
-              onChange={handleFileChange}
+              onChange={handleFilesSelected}
               accept="image/*,.heic,.heif"
+              multiple
               className="hidden"
               id="file-upload-input"
             />
-            <div className="flex items-center gap-4">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-28 h-28 rounded-xl overflow-hidden bg-stone-100 border border-stone-200 shrink-0 flex items-center justify-center text-stone-400 hover:bg-stone-200/60 transition-colors cursor-pointer"
-                aria-label={t('reportForm.photo.choose')}
-              >
-                {photoPreview ? (
-                  <img src={photoPreview} alt={t('reportForm.photo.previewAlt')} className="w-full h-full object-cover" />
-                ) : (
-                  <Camera className="w-7 h-7 text-brand-400" strokeWidth={1.5} />
+            {/* 相機：手機會直接開相機，一次一張 */}
+            <input
+              type="file"
+              ref={cameraInputRef}
+              onChange={handleFilesSelected}
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              id="camera-input"
+            />
+
+            {photos.length > 0 && (
+              <ul className="grid grid-cols-3 sm:grid-cols-5 gap-2 mb-3">
+                {photos.map((p, i) => (
+                  <li key={p.id} className="relative aspect-square rounded-xl overflow-hidden bg-stone-100 border border-stone-200">
+                    <img src={p.dataUrl} alt={t('reportForm.photo.thumbAlt', { n: i + 1 })} className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removePhoto(p.id)}
+                      disabled={isSubmitting}
+                      aria-label={t('reportForm.photo.remove')}
+                      title={t('reportForm.photo.remove')}
+                      className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center cursor-pointer disabled:opacity-50"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                    {i === 0 ? (
+                      <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-md bg-brand-500 text-white text-3xs font-semibold">
+                        {t('reportForm.photo.cover')}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => makeCover(p.id)}
+                        disabled={isSubmitting}
+                        className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-md bg-white/90 hover:bg-white text-stone-800 text-3xs font-medium flex items-center gap-0.5 cursor-pointer disabled:opacity-50"
+                      >
+                        <Star className="w-3 h-3" />
+                        {t('reportForm.photo.setCover')}
+                      </button>
+                    )}
+                  </li>
+                ))}
+
+                {canAddMore && (
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={busy}
+                      className="w-full aspect-square rounded-xl border-2 border-dashed border-stone-300 text-stone-500 flex flex-col items-center justify-center gap-1 hover:bg-stone-50 transition-colors cursor-pointer disabled:opacity-60"
+                    >
+                      {isProcessingPhotos ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
+                      <span className="text-2xs">{t('reportForm.photo.add')}</span>
+                    </button>
+                  </li>
                 )}
-              </button>
+              </ul>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              {photos.length === 0 && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={busy}
+                  className="w-28 h-28 rounded-xl bg-stone-100 border border-stone-200 shrink-0 flex items-center justify-center text-stone-400 hover:bg-stone-200/60 transition-colors cursor-pointer"
+                  aria-label={t('reportForm.photo.choose')}
+                >
+                  {isProcessingPhotos ? (
+                    <Loader2 className="w-7 h-7 animate-spin text-brand-400" />
+                  ) : (
+                    <Camera className="w-7 h-7 text-brand-400" strokeWidth={1.5} />
+                  )}
+                </button>
+              )}
 
               <div className="flex flex-col sm:flex-row gap-2">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2 rounded-lg bg-stone-900 hover:bg-black text-white text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer"
+                  disabled={busy || !canAddMore}
+                  className="px-4 py-2 rounded-lg bg-stone-900 hover:bg-black text-white text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
                 >
-                  <Upload className="w-4 h-4" />
-                  {photoPreview ? t('reportForm.photo.change') : t('reportForm.photo.choose')}
+                  <ImagePlus className="w-4 h-4" />
+                  {t('reportForm.photo.choose')}
                 </button>
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2 rounded-lg border border-stone-200 hover:bg-stone-50 text-stone-800 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer"
+                  onClick={() => cameraInputRef.current?.click()}
+                  disabled={busy || !canAddMore}
+                  className="px-4 py-2 rounded-lg border border-stone-200 hover:bg-stone-50 text-stone-800 text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
                 >
                   <Camera className="w-4 h-4 text-brand-500" />
                   {t('reportForm.photo.take')}
                 </button>
               </div>
+
+              <span className="text-xs text-stone-500 sm:ml-auto">
+                {t('reportForm.photo.count', { n: photos.length, max: MAX_CASE_PHOTOS })}
+              </span>
             </div>
           </FormSection>
 
@@ -594,9 +714,16 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
 
         {/* 右欄：摘要＋送出 */}
         <aside className="lg:sticky lg:top-24 rounded-2xl border border-stone-200 bg-stone-50 p-5 space-y-5">
-          <div className="hidden lg:flex aspect-[4/3] rounded-xl overflow-hidden bg-stone-200/70 items-center justify-center text-stone-400">
-            {photoPreview ? (
-              <img src={photoPreview} alt="" className="w-full h-full object-cover" />
+          <div className="hidden lg:flex relative aspect-[4/3] rounded-xl overflow-hidden bg-stone-200/70 items-center justify-center text-stone-400">
+            {cover ? (
+              <>
+                <img src={cover.dataUrl} alt="" className="w-full h-full object-cover" />
+                {photos.length > 1 && (
+                  <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded-full bg-black/60 text-white text-2xs">
+                    {t('reportForm.photo.count', { n: photos.length, max: MAX_CASE_PHOTOS })}
+                  </span>
+                )}
+              </>
             ) : (
               <Camera className="w-8 h-8 text-brand-400" strokeWidth={1.5} />
             )}
@@ -680,18 +807,18 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
 
           {statusKey && (
             <div className="p-3 bg-white border border-stone-200 text-stone-700 rounded-lg text-xs flex items-center gap-2">
-              {isSubmitting ? (
+              {busy ? (
                 <Loader2 className="w-4 h-4 animate-spin shrink-0" />
               ) : (
                 <Check className="w-4 h-4 text-emerald-600 shrink-0" />
               )}
-              <span>{t(statusKey)}</span>
+              <span>{t(statusKey, uploadProgress ?? { done: 0, total: photos.length })}</span>
             </div>
           )}
 
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={busy}
             id="btn-submit-report"
             className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
           >

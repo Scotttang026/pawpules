@@ -31,6 +31,19 @@
           "description": "Cloud Storage public download URL of animal photo",
           "maxLength": 2048
         },
+        "photos": {
+          "type": "array",
+          "maxItems": 5,
+          "description": "全部相片（第 1 張 = photoUrl 封面）；舊案件冇呢個欄位",
+          "items": {
+            "type": "object",
+            "required": ["url", "path"],
+            "properties": {
+              "url": { "type": "string", "maxLength": 2048 },
+              "path": { "type": "string", "description": "animal-reports/{caseId}/{0-4}.jpg" }
+            }
+          }
+        },
         "storagePath": {
           "type": "string",
           "description": "Cloud Storage object path linked to this case (e.g. animal-reports/PW-XXX.jpg)",

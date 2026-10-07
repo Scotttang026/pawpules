@@ -9,6 +9,8 @@ import { fetchCaseContact, ReporterContactInfo, rankFirestoreNGOs } from '../ser
 import { statusLabel, CASE_STATUSES } from '../utils/caseLabels';
 import { getApiLang } from '../i18n';
 import { X, MapPin, Phone, User, Clock, Navigation, Mail, Copy, Check, ShieldCheck, Trash2, Lock } from 'lucide-react';
+import { PhotoGallery } from './PhotoGallery';
+import { getCasePhotos } from '../utils/casePhotos';
 
 interface CaseDetailModalProps {
   report: StrayReport;
@@ -158,14 +160,7 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
         <div className="p-5 sm:p-6 overflow-y-auto space-y-6 flex-1">
           <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
             <div className="md:col-span-5">
-              <div className="aspect-4/3 rounded-2xl overflow-hidden bg-stone-100 border border-stone-200 shadow-xs">
-                <img src={report.photoUrl} alt={report.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-              </div>
-              {report.storagePath && (
-                <p className="text-3xs text-stone-500 font-mono mt-1.5 truncate px-1" title={report.storagePath}>
-                  ☁️ Storage: <span className="text-brand-800">{report.storagePath}</span>
-                </p>
-              )}
+              <PhotoGallery photos={getCasePhotos(report)} title={report.title} />
             </div>
 
             <div className="md:col-span-7 space-y-3">

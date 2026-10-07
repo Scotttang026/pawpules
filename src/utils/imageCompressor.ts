@@ -1,6 +1,7 @@
 import i18n from 'i18next';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../firebase';
+import { MAX_CASE_PHOTOS } from './casePhotos';
 
 const MAX_INPUT_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20MB，上傳前原始檔案上限
 const MAX_FIRESTORE_URL_LENGTH = 2048; // 對應 firestore.rules 嘅 photoUrl.size() <= 2048
@@ -134,33 +135,33 @@ export interface PhotoUploadResult {
 }
 
 /**
- * 上傳壓縮後圖片至 Firebase Cloud Storage（主要途徑，受 storage.rules 保護：
- * 只准新建、只准 JPEG、< 5MB、唔准覆蓋）。失敗時 fallback 去伺服器 /api/upload-photo。
- * 兩條路都失敗就拋出明確錯誤，絕對唔會將 base64 當 downloadUrl 回傳。
+ * 上傳一張壓縮後嘅相去 animal-reports/{caseId}/{index}.jpg。
+ * 主要途徑係 Firebase Storage（storage.rules：只准新建、只准 JPEG、< 5MB、唔准覆蓋），
+ * 失敗先 fallback 去 /api/upload-photo。兩條路都失敗就拋錯，唔會將 base64 當網址回傳。
  */
 export async function uploadAnimalPhoto(
   blob: Blob,
   caseId: string,
+  index: number,
   fallbackDataUrl?: string
 ): Promise<PhotoUploadResult> {
   if (!blob || blob.size === 0) {
     throw new PhotoError('photo.empty');
   }
-
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(caseId)) {
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(caseId) || !Number.isInteger(index) || index < 0 || index >= MAX_CASE_PHOTOS) {
     throw new PhotoError('photo.badCaseId');
   }
-  const safeCaseId = caseId;
-  // 檔名必須等於案件編號，firestore.rules 會核對相片屬於呢宗案件
-  const storagePath = `animal-reports/${safeCaseId}.jpg`;
+  // 一宗案件一個資料夾，firestore.rules 會核對相片屬於呢宗案件
+  const storagePath = `animal-reports/${caseId}/${index}.jpg`;
 
-  // Attempt 1: Direct Firebase Cloud Storage upload
+  // Attempt 1: 直接上傳 Firebase Storage
   try {
     const storageRef = ref(storage, storagePath);
     const snapshot = await uploadBytes(storageRef, blob, {
       contentType: 'image/jpeg',
       customMetadata: {
-        caseId: safeCaseId,
+        caseId,
+        index: String(index),
         uploadedAt: new Date().toISOString(),
       },
     });
@@ -170,16 +171,16 @@ export async function uploadAnimalPhoto(
     }
     console.warn('Storage download URL exceeds Firestore limit, falling back to server proxy.');
   } catch (storageError) {
-    console.warn('Direct Firebase Storage upload failed, attempting server upload proxy:', storageError);
+    console.warn(`Direct Firebase Storage upload failed (photo ${index}), attempting server upload proxy:`, storageError);
   }
 
-  // Attempt 2: Server-side upload route (/api/upload-photo)
+  // Attempt 2: server 後備上傳（/api/upload-photo）
   if (fallbackDataUrl) {
     try {
       const response = await fetch(`${API_BASE}/api/upload-photo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: fallbackDataUrl, caseId: safeCaseId }),
+        body: JSON.stringify({ imageBase64: fallbackDataUrl, caseId, index }),
       });
       if (response.ok) {
         const result = await response.json();
@@ -200,4 +201,27 @@ export async function uploadAnimalPhoto(
   }
 
   throw new PhotoError('photo.uploadFailed');
+}
+
+/**
+ * 同時上傳全部相（次序 = 陣列次序，第 0 張係封面）。
+ * 任何一張失敗都會拋錯；已經上載咗嘅相會留喺 Storage（rules 唔准前端刪除），
+ * 但冇案件文件指住佢哋，唔會喺網頁出現。
+ */
+export async function uploadCasePhotos(
+  items: { blob: Blob; dataUrl: string }[],
+  caseId: string,
+  onProgress?: (done: number, total: number) => void
+): Promise<PhotoUploadResult[]> {
+  const total = items.length;
+  let done = 0;
+  onProgress?.(0, total);
+  return Promise.all(
+    items.map(async (item, i) => {
+      const result = await uploadAnimalPhoto(item.blob, caseId, i, item.dataUrl);
+      done += 1;
+      onProgress?.(done, total);
+      return result;
+    })
+  );
 }

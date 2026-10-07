@@ -53,6 +53,10 @@ export interface NGOOrganization {
   matchScore?: number;
 }
 
+export interface CasePhoto {
+  url: string;   // Storage 下載網址
+  path: string;  // animal-reports/{caseId}/{index}.jpg
+}
 
 export interface StrayReport {
   id: string; // Case ID
@@ -61,6 +65,7 @@ export interface StrayReport {
   customAnimalName?: string;
   photoUrl: string; // Cloud Storage public URL or served URL
   storagePath?: string; // Cloud Storage object path linked to this case
+  photos?: CasePhoto[];  // 全部相（第 1 張 = photoUrl 封面）；舊案件冇呢個欄位
   location: LocationCoords;
   description: string;
   reporterName: string;

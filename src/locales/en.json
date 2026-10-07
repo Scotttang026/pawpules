@@ -45,11 +45,18 @@
     },
     "photo": {
       "title": "Photo",
-      "hint": "Photograph the injury or the whole animal. Photos are compressed automatically",
       "choose": "Choose photo",
       "change": "Change photo",
       "take": "Take photo",
-      "previewAlt": "Photo preview"
+      "previewAlt": "Photo preview",
+      "hint": "Up to {{max}} photos from different angles. The first one is the cover shown in the case list and map.",
+      "add": "Add",
+      "remove": "Remove this photo",
+      "cover": "Cover",
+      "setCover": "Set as cover",
+      "count": "{{n}} / {{max}} photos",
+      "limitReached": "You can upload up to {{max}} photos. Extra photos were skipped.",
+      "thumbAlt": "Photo {{n}}"
     },
     "location": {
       "title": "Location",
@@ -86,7 +93,8 @@
       "notAdded": "Not added",
       "notConfirmed": "Not confirmed",
       "filled": "Filled in",
-      "notFilled": "Not filled in"
+      "notFilled": "Not filled in",
+      "photoCount": "{{n}} added"
     },
     "captcha": {
       "label": "Verification code",
@@ -108,7 +116,8 @@
       "searchUnavailable": "Address search is unavailable right now. Please try again later, or tap “Use GPS”.",
       "preparing": "Preparing your report…",
       "uploading": "Uploading photo…",
-      "saving": "Saving your report and analysing injuries with AI…"
+      "saving": "Saving your report and analysing injuries with AI…",
+      "uploadingN": "Uploading photos ({{done}}/{{total}})…"
     },
     "errors": {
       "noPhoto": "Please upload or take a photo of the animal first",
@@ -276,7 +285,16 @@
     "aiNoResponseTitle": "No response from Gemini",
     "aiNoResponseBody": "AI injury analysis is unavailable. Please act according to the situation on site.",
     "navigate": "Open Google Maps directions",
-    "closeView": "Close"
+    "closeView": "Close",
+    "gallery": {
+    "prev": "Previous photo",
+    "next": "Next photo",
+    "counter": "{{n}} / {{total}}",
+    "photoAlt": "{{title}} – photo {{n}}",
+    "noPhoto": "No photo",
+    "goTo": "View photo {{n}}"
+  }
+
   },
   "ngoMatch": {
     "headerTitle": "Nearby NGOs matched automatically ({{n}} recommended)",
