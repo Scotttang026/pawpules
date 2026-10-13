@@ -1,8 +1,9 @@
 // src/components/PhotoGallery.tsx
 // 案件詳情嘅相片 gallery：手機用手指左右碌（scroll-snap），桌面用箭咀同縮圖
+// blurred = 可能含血腥畫面，未確認之前全部模糊
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, ChevronRight, ImageOff } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ImageOff, EyeOff } from 'lucide-react';
 import type { CasePhoto } from '../types';
 
 // 案件標題係純文字，唔需要 HTML escape
@@ -11,14 +12,17 @@ const NO_ESCAPE = { interpolation: { escapeValue: false } } as const;
 interface PhotoGalleryProps {
   photos: CasePhoto[];
   title: string;
+  blurred?: boolean;
+  onReveal?: () => void;
 }
 
-export const PhotoGallery: React.FC<PhotoGalleryProps> = ({ photos, title }) => {
+export const PhotoGallery: React.FC<PhotoGalleryProps> = ({ photos, title, blurred = false, onReveal }) => {
   const { t } = useTranslation();
   const trackRef = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(0);
   const total = photos.length;
   const photoKey = photos.map((p) => p.url).join('|');
+  const blurClass = blurred ? 'blur-2xl scale-110' : '';
 
   // 換咗案件就返去第 1 張
   useEffect(() => {
@@ -70,19 +74,36 @@ export const PhotoGallery: React.FC<PhotoGalleryProps> = ({ photos, title }) => 
           className="flex h-full overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden focus:outline-none"
         >
           {photos.map((p, i) => (
-            <img
-              key={`${i}-${p.url}`}
-              src={p.url}
-              alt={t('caseModal.gallery.photoAlt', { title, n: i + 1, ...NO_ESCAPE })}
-              loading={i === 0 ? 'eager' : 'lazy'}
-              draggable={false}
-              referrerPolicy="no-referrer"
-              className="w-full h-full shrink-0 snap-center object-cover"
-            />
+            <div key={`${i}-${p.url}`} className="w-full h-full shrink-0 snap-center overflow-hidden">
+              <img
+                src={p.url}
+                alt={t('caseModal.gallery.photoAlt', { title, n: i + 1, ...NO_ESCAPE })}
+                loading={i === 0 ? 'eager' : 'lazy'}
+                draggable={false}
+                referrerPolicy="no-referrer"
+                className={`w-full h-full object-cover transition ${blurClass}`}
+              />
+            </div>
           ))}
         </div>
 
-        {total > 1 && (
+        {blurred && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/30 text-white text-center p-4">
+            <EyeOff className="w-7 h-7" />
+            <p className="text-xs font-semibold">{t('sensitive.blurredHint')}</p>
+            {onReveal && (
+              <button
+                type="button"
+                onClick={onReveal}
+                className="px-3 py-1.5 rounded-lg bg-white hover:bg-stone-100 text-stone-900 text-xs font-bold cursor-pointer"
+              >
+                {t('sensitive.show')}
+              </button>
+            )}
+          </div>
+        )}
+
+        {total > 1 && !blurred && (
           <>
             <button
               type="button"
@@ -124,7 +145,13 @@ export const PhotoGallery: React.FC<PhotoGalleryProps> = ({ photos, title }) => 
                 i === index ? 'border-brand-500' : 'border-transparent opacity-70 hover:opacity-100'
               }`}
             >
-              <img src={p.url} alt="" loading="lazy" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+              <img
+                src={p.url}
+                alt=""
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                className={`w-full h-full object-cover ${blurred ? 'blur-md scale-110' : ''}`}
+              />
             </button>
           ))}
         </div>

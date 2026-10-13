@@ -34,7 +34,8 @@
         "pending": "待處理",
         "in_progress": "跟進中",
         "rescued": "已救援",
-        "closed": "已結案"
+        "closed": "已結案",
+        "pending_deletion": "待刪除"
     },
     "urgency": {
         "P0": "極度危急",
@@ -476,6 +477,231 @@
     },
     "adminDashboard": {
         "viewDetails": "查看個案詳情"
+    },
+    "member": {
+        "lastName": "姓",
+        "firstName": "名",
+        "username": "帳戶名",
+        "usernameHint": "2–30 個字，可使用中文、英文、數字及 _ - . ! @ # $ % & * + = ? ~ ^ ( ) [ ]；不可有空格；留言時會顯示，設定後不可更改",
+        "email": "電郵",
+        "password": "密碼",
+        "passwordHint": "最少 8 個字",
+        "confirmPassword": "確認密碼",
+        "registerLink": "未有帳戶？註冊會員",
+        "registerTitle": "註冊會員",
+        "registerBody": "註冊後可以留言，以及查看自己通報過的案件。",
+        "registerSubmit": "註冊",
+        "registerDoneTitle": "註冊成功",
+        "registerDoneBody": "驗證信已寄到 {{email}}，按信中連結完成驗證後即可留言。",
+        "backToLogin": "返回登入",
+        "close": "關閉",
+        "setup": {
+        "title": "設定帳戶",
+        "body": "為 {{email}} 設定密碼及會員資料。",
+        "checking": "正在檢查連結…",
+        "invalidTitle": "連結無效或已過期",
+        "invalidBody": "請返回 PawPulse，在登入視窗按「忘記密碼」重新取得連結。",
+        "passwordSet": "密碼已設定，請完成會員資料。",
+        "submit": "完成設定",
+        "doneTitle": "設定完成",
+        "doneBody": "你已經登入，可以開始使用 PawPulse。",
+        "goHome": "前往 PawPulse"
+        },
+        "account": {
+            "open": "帳戶設定",
+            "title": "帳戶設定",
+            "body": "姓名不會公開，留言只會顯示帳戶名。",
+            "emailLabel": "登入電郵",
+            "renameWarning": "帳戶名每 {{days}} 日只可以更改 1 次。改名後，你以前的留言會一併顯示新名稱，舊名稱會即時釋放，其他人可以使用。",
+            "renameConfirm": "確定將帳戶名由「{{from}}」改為「{{to}}」？\n\n改名後 {{days}} 日內不可再改，舊名稱會即時釋放給其他人使用。",
+            "cooldown": "帳戶名下次可更改日期：{{date}}",
+            "saved": "已儲存",
+            "save": "儲存",
+            "cancel": "取消"
+        },
+
+        "profileModal": {
+        "title": "完成會員資料",
+        "body": "留言前需要填寫姓名及帳戶名。姓名不會公開，留言只會顯示帳戶名。",
+        "submit": "儲存",
+        "later": "稍後"
+        },
+        "verify": {
+        "body": "你的電郵尚未驗證，驗證後才可以留言。",
+        "resend": "重寄驗證信",
+        "sent": "已寄出，請查收（包括垃圾郵件）。",
+        "refresh": "我已驗證",
+        "stillUnverified": "仍未驗證，請先按信中的連結。",
+        "dismiss": "關閉"
+        },
+        "errors": {
+        "nameRequired": "請填寫姓和名（各最多 50 字）",
+        "usernameInvalid": "帳戶名格式不正確（2–30 個字，最少包含一個文字或數字，不可有空格或 / < > \" '）",
+        "usernameTaken": "此帳戶名已被使用，請換一個",
+        "usernameCooldown": "帳戶名 30 日內只可以更改 1 次，請稍後再試",
+        "saveFailed": "儲存會員資料失敗，請稍後再試",
+        "emailInUse": "此電郵已有帳戶（通報時可能已自動建立）。請返回登入，按「忘記密碼」設定密碼。",
+        "weakPassword": "密碼最少要 8 個字",
+        "passwordMismatch": "兩次輸入的密碼不一樣",
+        "linkExpired": "連結無效或已過期，請重新取得連結",
+        "generic": "發生錯誤，請稍後再試"
+        }
+    },
+    "editCase": {
+        "button": "修改案件",
+        "title": "修改案件",
+        "hint": "通報後 24 小時內可以修改 1 次。原本嘅相會全部保留，可以加新相（總共最多 5 張）。修改後 AI 會重新分析。",
+        "oldPhoto": "原本",
+        "newPhoto": "新增",
+        "addPhoto": "加相",
+        "confirm": "每宗案件只可以修改 1 次，儲存之後就唔可以再改。確定要儲存？",
+        "uploading": "上載新相片中…",
+        "saving": "儲存中，AI 重新分析需時約 10 秒…",
+        "saved": "已儲存修改，AI 已重新分析。",
+        "savedNoAi": "已儲存修改，但 AI 暫時未能重新分析，緊急度暫定為 P1。",
+        "cancel": "取消",
+        "save": "儲存修改",
+        "states": {
+        "editable": "",
+        "accepted": "已有機構接手，唔可以再修改",
+        "locked": "案件已進入處理程序，唔可以再修改",
+        "used": "已用咗修改機會（每宗案件 1 次）",
+        "expired": "已超過 24 小時，唔可以再修改"
+        },
+        "errors": {
+        "unauthenticated": "請先登入",
+        "not_owner": "只有報案人可以修改此案件",
+        "not_found": "找不到案件",
+        "case_accepted": "已有機構接手，唔可以再修改",
+        "case_locked": "案件已進入處理程序，唔可以再修改",
+        "edit_expired": "已超過 24 小時，唔可以再修改",
+        "edit_used": "此案件已修改過",
+        "bad_photos": "相片資料不正確，請重新揀相",
+        "bad_input": "資料不完整，請檢查後再試",
+        "generic": "修改失敗，請稍後再試"
+        }
+    },
+    "deleteRequest": {
+        "button": "申請刪除",
+        "title": "申請刪除案件",
+        "hint": "報案人冇權直接刪除案件。提交後案件會暫時隱藏（「我的案件」都會暫時睇唔到），由管理員審批；管理員亦可以還原案件。",
+        "reasonLabel": "刪除原因",
+        "reasonPlaceholder": "請揀一個原因",
+        "reasons": {
+        "duplicate": "重複通報",
+        "resolved": "動物已獲救／已離開現場",
+        "wrong_info": "資料填錯",
+        "privacy": "相片或內容涉及私隱",
+        "mistake": "誤報（唔係需要救援嘅動物）",
+        "other": "其他"
+        },
+        "noteOptional": "補充說明（選填）",
+        "noteRequired": "請說明原因（必填）",
+        "notePlaceholder": "例如：已經另外報咗案，編號 PW-…",
+        "submit": "提交申請",
+        "cancel": "取消",
+        "sent": "已提交刪除申請，管理員會盡快處理。",
+        "errors": {
+        "noReason": "請揀刪除原因",
+        "noNote": "揀「其他」就要填寫說明",
+        "unauthenticated": "請先登入",
+        "not_owner": "只有報案人可以申請刪除此案件",
+        "not_found": "找不到案件",
+        "case_accepted": "已有機構接手，請改用「聯絡管理員」",
+        "case_locked": "案件已進入處理程序，請改用「聯絡管理員」",
+        "already_requested": "此案件已經提交過刪除申請",
+        "bad_input": "資料不完整，請檢查後再試",
+        "generic": "提交失敗，請稍後再試"
+        },
+        "admin": {
+        "title": "報案人已申請刪除此案件",
+        "note": "補充說明",
+        "requestedAt": "申請時間",
+        "confirmDelete": "確認刪除",
+        "restore": "還原案件",
+        "deleteConfirm": "確定永久刪除此案件？案件、聯絡資料同所有相片都會刪除，無法復原。",
+        "deleteFailed": "刪除失敗，請稍後再試",
+        "restoreFailed": "還原失敗，請稍後再試",
+        "ngoNotice": "此案件正等待管理員處理刪除申請，暫時唔可以接手。"
+        }
+    },
+    "contactAdmin": {
+        "button": "聯絡管理員",
+        "title": "聯絡管理員",
+        "hint": "如果你想修改或者刪除已經唔可以自己改嘅案件，或者有其他問題，可以喺度話俾管理員知。管理員會用你登入嘅電郵回覆你。",
+        "categoryLabel": "類別",
+        "categoryPlaceholder": "請揀一個類別",
+        "categories": {
+        "update": "更新案件內容",
+        "delete": "刪除案件",
+        "photo": "相片問題（例如要移除相片）",
+        "status": "查詢救援進度",
+        "other": "其他"
+        },
+        "messageLabel": "內容（必填）",
+        "placeholders": {
+        "update": "請寫低要改咩，例如：動物而家喺對面馬路嘅公園入面",
+        "delete": "請寫低想刪除嘅原因",
+        "photo": "請寫低係邊張相（例如第 2 張）同埋有咩問題",
+        "status": "請寫低你想知道嘅事",
+        "other": "請寫低你嘅問題"
+        },
+        "submit": "發送",
+        "cancel": "取消",
+        "sent": "已發送俾管理員，管理員會用電郵回覆你。",
+        "errors": {
+        "noCategory": "請揀一個類別",
+        "noMessage": "請填寫內容",
+        "unauthenticated": "請先登入",
+        "not_owner": "只有報案人可以就此案件聯絡管理員",
+        "not_found": "找不到案件",
+        "bad_input": "資料不完整，請檢查後再試",
+        "too_many": "發送太頻密，請過幾分鐘再試",
+        "generic": "發送失敗，請稍後再試"
+        }
+    },
+    "sensitive": {
+        "coverLabel": "可能含令人不安畫面",
+        "title": "相片可能含血腥或令人不安嘅畫面",
+        "body": "AI 判斷呢宗案件有相片可能顯示流血、傷口等畫面。確定要顯示？",
+        "bodyUnchecked": "AI 未完成檢查呢宗案件嘅相片，相片可能顯示流血、傷口等畫面。確定要顯示？",
+        "blurredHint": "相片已模糊處理",
+        "show": "顯示相片",
+        "notNow": "暫時唔睇"
+    },
+    "comments": {
+        "title": "留言",
+        "count": "{{n}} 則留言",
+        "empty": "暫時未有留言。",
+        "loadFailed": "載入留言失敗，請稍後再試。",
+        "loginHint": "登入會員後即可留言。",
+        "placeholder": "寫下你的留言…",
+        "send": "發佈",
+        "reply": "回覆",
+        "replyingTo": "正在回覆 {{name}}",
+        "cancelReply": "取消回覆",
+        "delete": "刪除",
+        "deleteConfirm": "確定刪除這則留言？刪除後不能還原。",
+        "deleted": "此留言已被刪除",
+        "adminName": "PawPulse 管理員",
+        "unknownUser": "會員",
+        "badgeReporter": "報案人",
+        "badgeNgo": "救援機構",
+        "badgeAdmin": "管理員",
+        "errors": {
+        "login_required": "請先登入。",
+        "email_unverified": "請先完成電郵驗證才可以留言。",
+        "profile_required": "請先完成會員資料（姓、名、帳戶名）才可以留言。",
+        "empty": "留言不可以空白。",
+        "too_long": "留言不可超過 {{max}} 字。",
+        "bad_parent": "你回覆的留言不存在。",
+        "not_found": "找不到此案件或留言。",
+        "pending_deletion": "此案件正等待管理員處理刪除申請，暫停留言。",
+        "forbidden": "你沒有權限刪除這則留言。",
+        "rate_limited": "留言過於頻繁，請稍後再試。",
+        "unknown": "操作失敗，請稍後再試。"
+        }
     }
+
 
 }

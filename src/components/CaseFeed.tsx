@@ -6,7 +6,8 @@ import {
   CASE_TAGS, tagLabel, matchesTagFilter,
 } from '../utils/caseLabels';
 import { getApiLang } from '../i18n';
-import { Search, Sparkles, MapPin, Clock, ShieldAlert, ChevronRight } from 'lucide-react';
+import { Search, Sparkles, MapPin, Clock, ShieldAlert, ChevronRight, EyeOff } from 'lucide-react';
+import { isCoverSensitive } from '../utils/sensitivePhotos';
 import { AnimalIcon } from './AnimalIcons';
 
 interface CaseFeedProps {
@@ -23,6 +24,7 @@ const STATUS_BADGE_CLASS: Record<CaseStatus, string> = {
   in_progress: 'bg-blue-100 text-blue-800 border-blue-200',
   rescued: 'bg-emerald-100 text-emerald-800 border-emerald-200',
   closed: 'bg-stone-200 text-stone-800 border-stone-300',
+  pending_deletion: 'bg-rose-100 text-rose-800 border-rose-200',
 };
 
 function formatTime(value: string | number | Date): string {
@@ -184,6 +186,7 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({ reports, onSelectReport, onN
               ? report.aiAnalysis!.apparentInjuries
               : [];
             const topNgo = report.matchedNGOs?.[0];
+            const blurCover = isCoverSensitive(report);
 
             return (
               <div
@@ -199,11 +202,20 @@ export const CaseFeed: React.FC<CaseFeedProps> = ({ reports, onSelectReport, onN
                     <img
                       src={report.photoUrl}
                       alt={report.title}
-                      className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+                      className={`w-full h-full object-cover transition-transform duration-300 ${
+                        blurCover ? 'blur-xl scale-110' : 'hover:scale-105'
+                      }`}
                       referrerPolicy="no-referrer"
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
                     />
-
+                    {blurCover && (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-black/60 text-white text-[11px] font-semibold">
+                          <EyeOff className="w-3.5 h-3.5" />
+                          {t('sensitive.coverLabel')}
+                        </span>
+                      </div>
+                    )}
                     <div className="absolute top-3 left-3 flex items-center gap-1.5">
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-xs font-bold text-white shadow-xs ${

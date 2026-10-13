@@ -40,14 +40,17 @@ import {
   Mail,
   AlertTriangle,
   Plus,
-  X,
+  X,UserCog ,
 } from 'lucide-react';
 import { NgoWorkspace } from './components/NgoWorkspace';
 import MyCases from './components/MyCases';
+import { SetPasswordPage } from './components/SetPasswordPage';
+import { MemberPrompts } from './components/MemberPrompts';
+import { AccountSettingsModal } from './components/AccountSettingsModal';
 
 function AppContent() {
   const { t } = useTranslation();
-  const { isAdmin, isNgo, role, loading } = useAuth();
+  const { isAdmin, isNgo, role, loading, user, profile } = useAuth();
   const emergency = getEmergencyContact();
   const [reports, setReports] = useState<StrayReport[]>([]);
   const [ngos, setNgos] = useState<NGOOrganization[]>([]);
@@ -56,6 +59,7 @@ function AppContent() {
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number } | undefined>(undefined);
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showAccountModal, setShowAccountModal] = useState(false);
   // 登入成功後等身份讀完，先跳去對應頁面（重新載入網頁唔會跳）
   const [redirectAfterLogin, setRedirectAfterLogin] = useState(false);
   const [justSubmittedReport, setJustSubmittedReport] = useState<StrayReport | null>(null);
@@ -78,10 +82,12 @@ function AppContent() {
     }
   }, [loading, homeTab, redirectAfterLogin, currentTab]);
 
-  useEffect(() => {
+    useEffect(() => {
+    // admin／NGO 睇埋「待刪除」案件；一般用戶同訪客睇唔到
     const unsubscribeCases = subscribeToCases(
       (updatedCases) => setReports(updatedCases),
-      (err) => console.warn('Real-time cases sync warning:', err)
+      (err) => console.warn('Real-time cases sync warning:', err),
+      isAdmin || isNgo
     );
 
     const unsubscribeNGOs = subscribeToNGOs(
@@ -93,7 +99,7 @@ function AppContent() {
       unsubscribeCases();
       unsubscribeNGOs();
     };
-  }, []);
+  }, [isAdmin, isNgo]);
 
   // 追蹤連結：只喺頁面載入時處理一次，開完 modal 即刻清走網址上的 ?caseId=，
   // 避免之後每次 Firestore 同步都將已關閉的 modal 重新彈出。
@@ -378,6 +384,16 @@ function AppContent() {
                     <span className="sm:hidden">{urgentCount}</span>
                   </button>
                 )}
+                {user && profile && (
+                  <button
+                    onClick={() => setShowAccountModal(true)}
+                    aria-label={t('member.account.open')}
+                    title={`${t('member.account.open')}（${profile.username}）`}
+                    className="w-9 h-9 inline-flex items-center justify-center rounded-lg border border-stone-200 hover:bg-stone-50 transition-colors cursor-pointer"
+                  >
+                    <UserCog className="w-4 h-4 text-stone-600" />
+                  </button>
+                )}
 
                 {emergency && (
                   <>
@@ -582,14 +598,18 @@ function AppContent() {
           onSuccess={() => setRedirectAfterLogin(true)}
         />
       )}
+      <MemberPrompts suspended={showLoginModal} />
+      {showAccountModal && <AccountSettingsModal onClose={() => setShowAccountModal(false)} />}
     </div>
   );
 }
 
 export default function App() {
+  // 設定密碼連結（/set-password?oobCode=...）：獨立一版，唔顯示主介面
+  const isSetPasswordPage = window.location.pathname.replace(/\/+$/, '') === '/set-password';
   return (
     <AuthProvider>
-      <AppContent />
+      {isSetPasswordPage ? <SetPasswordPage /> : <AppContent />}
     </AuthProvider>
   );
 }

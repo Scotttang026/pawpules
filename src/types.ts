@@ -10,7 +10,7 @@ export type UrgencyLevel = 'P0' | 'P1' | 'P2'; // P0: 極度緊急(重傷/瀕危
 // isValidCase() 只接受 pending/in_progress/rescued/closed 四個值，
 // 寫入其他兩個值會被 Firestore 直接拒絕。如果你有計劃將來引入
 // 更細緻嘅分階段狀態，請同時擴充 firestore.rules 嘅 enum。
-export type CaseStatus = 'pending' | 'in_progress' | 'rescued' | 'closed';
+export type CaseStatus = 'pending' | 'in_progress' | 'rescued' | 'closed' | 'pending_deletion';
 
 export type NGOCapacityStatus = 'available' | 'busy' | 'full';
 
@@ -32,6 +32,8 @@ export interface AIAnalysisResult {
   firstAidAdvice: string[];
   handlingPrecautions: string[];
   confidenceScore: number;
+    /** 可能含血腥／令人不安畫面嘅相片位置（0 = 封面）；冇呢個欄位 = 未檢查，當有問題 */
+  sensitivePhotos?: number[];
   analyzedAt: string;
 }
 
@@ -77,6 +79,15 @@ export interface CaseAcceptance {
   acceptedAt: string;
 }
 
+export type DeleteReason = 'duplicate' | 'resolved' | 'wrong_info' | 'privacy' | 'mistake' | 'other';
+export type ContactCategory = 'update' | 'delete' | 'photo' | 'status' | 'other';
+
+export interface DeletionRequest {
+  reason: DeleteReason;
+  note: string | null;
+  requestedAt: string;
+}
+
 export interface StrayReport {
   id: string; // Case ID
   title: string;
@@ -99,6 +110,9 @@ export interface StrayReport {
   geminiResponse?: AIAnalysisResult | null; // gemini 回答內容
   aiAnalysis?: AIAnalysisResult | null;
   matchedNGOs?: NGOOrganization[];
+  editCount?: number;       // 報案人改咗幾多次（最多 1）
+  editedAt?: string | null; // 最後修改時間（ISO）
+  deletionRequest?: DeletionRequest | null; // 只有待刪除案件有
   dispatchedToNGO?: {
     ngoId: string;
     ngoName: string;
@@ -110,15 +124,30 @@ export interface StrayReport {
   };
 }
 
+export type CommentRole = 'user' | 'ngo' | 'admin';
+
+// case/{caseId}/comments/{id}：只可以經 server 寫
+export interface CaseComment {
+  id: string;
+  uid: string;
+  role: CommentRole;
+  authorName: string | null; // admin 係 null，前端顯示「PawPulse 管理員」
+  isReporter: boolean;
+  text: string;
+  parentId: string | null; // null = 主留言；回覆只得一層
+  deleted: boolean;
+  createdAt: string; // ISO
+}
+
+
 // 登入後嘅身份；未登入就係 null（唔係呢度其中一個值）
 export type UserRole = 'user' | 'ngo' | 'admin';
 
-export interface UserProfile {
-  uid: string;
-  email: string | null;
-  displayName: string | null;
-  photoURL: string | null;
-  role: UserRole;
-  ngoId: string | null; // 只有 ngo 先有，對應 ngodatail/{ngoId}
-  isAdmin: boolean;
+/** 會員資料：userprofiles/{uid}（只有本人同 admin 讀得到；只可以經 server 寫） */
+export interface MemberProfile {
+  firstName: string;
+  lastName: string;
+  username: string;
+  /** 上次改帳戶名嘅時間（毫秒）；第一次設定唔計，所以係 null */
+  usernameChangedAt?: number | null;
 }

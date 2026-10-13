@@ -10,13 +10,18 @@ import { statusLabel, animalLabel, CASE_STATUSES } from '../utils/caseLabels';
 import { getApiLang } from '../i18n';
 import {
   X, MapPin, Phone, User, Clock, Navigation, Mail, Copy, Check, ShieldCheck, Trash2, Lock,
-  Building2, Handshake, Loader2, ClipboardList,
+  Building2, Handshake, Loader2, ClipboardList, AlertTriangle,
 } from 'lucide-react';
+import {
+  hasSensitivePhotos, isSensitiveChecked, isSensitiveAcknowledged, acknowledgeSensitive,
+} from '../utils/sensitivePhotos';
 import { AnimalIcon } from './AnimalIcons';
 import { PhotoGallery } from './PhotoGallery';
 import { GeminiIcon, CareIcon } from './BrandIcons';
 import { getCasePhotos } from '../utils/casePhotos';
 import { NGO_STATUSES } from './NgoWorkspace';
+import DeletionRequestBanner from './DeletionRequestBanner';
+import CaseComments from './CaseComments';
 
 interface CaseDetailModalProps {
   report: StrayReport;
@@ -56,6 +61,20 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
 
   const [contactInfo, setContactInfo] = useState<ReporterContactInfo | null>(null);
   const [loadingContact, setLoadingContact] = useState(false);
+    // 血腥相片警告：同一個分頁之內確認過就唔再問
+  const needsWarning = hasSensitivePhotos(report);
+  const [acked, setAcked] = useState(() => isSensitiveAcknowledged(report.id));
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    setAcked(isSensitiveAcknowledged(report.id));
+    setDismissed(false);
+  }, [report.id]);
+  const photosRevealed = !needsWarning || acked;
+  const showSensitiveDialog = needsWarning && !acked && !dismissed;
+  const revealPhotos = () => {
+    acknowledgeSensitive(report.id);
+    setAcked(true);
+  };
 
   // 自己機構接手咗嘅案件
   const isMyCase = isNgo && !!ngoId && report.acceptedBy?.ngoId === ngoId;
@@ -187,7 +206,13 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
         <div className="p-5 sm:p-6 overflow-y-auto space-y-6 flex-1">
           <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
             <div className="md:col-span-5">
-              <PhotoGallery photos={getCasePhotos(report)} title={report.title} />
+              <DeletionRequestBanner report={report} onDeleted={onClose} />
+              <PhotoGallery
+                photos={getCasePhotos(report)}
+                title={report.title}
+                blurred={!photosRevealed}
+                onReveal={revealPhotos}
+              />
             </div>
 
             <div className="md:col-span-7 space-y-3">
@@ -366,7 +391,11 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
           {activeTab === 'ngos' && (
             <NGOMatchFeedback report={enrichedReport} matchedNGOs={liveMatchedNGOs} onDispatchToNGO={onDispatchToNGO} />
           )}
+
+          {/* 5D 留言：喺分頁下面，唔理揀咗 AI 定 NGO 分頁都會顯示 */}
+          <CaseComments report={report} />
         </div>
+
 
         <div className="p-4 bg-stone-50 border-t border-stone-200 flex items-center justify-between gap-2">
           <a
@@ -386,6 +415,43 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
             {t('caseModal.closeView')}
           </button>
         </div>
+        {showSensitiveDialog && (
+          <div
+            className="absolute inset-0 z-20 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="sensitive-title"
+          >
+            <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl border border-stone-200 p-5 space-y-3 text-center">
+              <div className="w-12 h-12 mx-auto rounded-full bg-amber-100 flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6 text-amber-600" />
+              </div>
+              <h3 id="sensitive-title" className="text-sm font-bold text-stone-900">
+                {t('sensitive.title')}
+              </h3>
+              <p className="text-xs text-stone-600 leading-relaxed">
+                {isSensitiveChecked(report) ? t('sensitive.body') : t('sensitive.bodyUnchecked')}
+              </p>
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => setDismissed(true)}
+                  className="flex-1 px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold transition-colors"
+                >
+                  {t('sensitive.notNow')}
+                </button>
+                <button
+                  type="button"
+                  onClick={revealPhotos}
+                  className="flex-1 px-3 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold transition-colors"
+                >
+                  {t('sensitive.show')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

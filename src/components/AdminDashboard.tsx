@@ -28,6 +28,7 @@ import {
   subscribeToNgoAccounts,
 } from '../services/caseService';
 import AddressAutocomplete from './AddressAutocomplete';
+import { isCoverSensitive } from '../utils/sensitivePhotos';
 
 interface AdminDashboardProps {
   reports: StrayReport[];
@@ -393,8 +394,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         onError={(e) => {
                           (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
                         }}
-                        className="w-14 h-14 rounded-xl object-cover bg-stone-100 border border-stone-200 shrink-0"
-                      />
+                        className={`w-12 h-12 rounded-lg object-cover ${isCoverSensitive(c) ? 'blur-md scale-110' : ''}`}/>
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <button

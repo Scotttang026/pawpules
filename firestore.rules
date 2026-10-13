@@ -24,6 +24,14 @@ service cloud.firestore {
       allow write: if false;                                 // 只可以經 server 寫
     }
 
+    // 會員資料（5A）：姓名唔公開，只有本人同 admin 讀得到；只可以經 server 寫
+    match /userprofiles/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if false;
+    }
+    // usernames/{帳戶名}：只供 server 檢查重複，由最尾嘅 deny all 擋住，唔使另外寫
+
+
 
     // 登入者所屬機構 ID（一定要先確認 isNgo() 先好 call）
     function myNgoId() {
@@ -134,7 +142,10 @@ service cloud.firestore {
     }
 
     match /case/{caseId} {
-      allow read: if true;
+      // 「待刪除」案件只有 admin 同 NGO 睇到
+      allow read: if resource == null
+                  || resource.data.status in ['pending', 'in_progress', 'rescued', 'closed']
+                  || isAdmin() || isNgo();
       // 必須同 private/contact 喺同一個 batch 一齊建立
       allow create: if isValidCase(caseId, request.resource.data)
         && existsAfter(/databases/$(database)/documents/case/$(caseId)/private/contact);
@@ -150,6 +161,14 @@ service cloud.firestore {
           && existsAfter(/databases/$(database)/documents/case/$(caseId))
           && isValidContact(request.resource.data);
         allow update, delete: if isAdmin();
+      }
+
+      // 5D 留言：睇到案件就睇到留言（待刪除案件只限 admin / NGO）；只可以經 server 寫
+      match /comments/{commentId} {
+        allow read: if get(/databases/$(database)/documents/case/$(caseId)).data.status
+                         in ['pending', 'in_progress', 'rescued', 'closed']
+                    || isAdmin() || isNgo();
+        allow write: if false;
       }
     }
 

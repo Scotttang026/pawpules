@@ -169,6 +169,27 @@ const FRESH_CASE_WINDOW_MS = 15 * 60 * 1000; // 案件建立後 15 分鐘內先�
 const MAX_CASE_PHOTOS = 5;
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const MAX_NGO_ACCOUNTS = 5; // 每間機構最多幾多個登入帳戶
+const EDIT_WINDOW_MS = 24 * 60 * 60 * 1000; // 報案人 24 小時內可以改
+const MAX_REPORTER_EDITS = 1;               // 只可以改 1 次
+const TAG_RE = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
+const DELETE_REASONS = new Set(["duplicate", "resolved", "wrong_info", "privacy", "mistake", "other"]);
+const DELETE_REASON_ZH: Record<string, string> = {
+  duplicate: "重複通報",
+  resolved: "動物已獲救／已離開現場",
+  wrong_info: "資料填錯",
+  privacy: "相片或內容涉及私隱",
+  mistake: "誤報",
+  other: "其他",
+};
+const NORMAL_STATUSES = ["pending", "in_progress", "rescued", "closed"];
+const CONTACT_CATEGORIES = new Set(["update", "delete", "photo", "status", "other"]);
+const CONTACT_CATEGORY_ZH: Record<string, string> = {
+  update: "更新案件內容",
+  delete: "刪除案件",
+  photo: "相片問題",
+  status: "查詢救援進度",
+  other: "其他",
+};
 
 // 案件相片路徑：只接受 photos[].path 入面屬於呢宗案件資料夾嘅路徑，唔信 Firestore 入面任意字串
 function casePhotoPaths(caseId: string, data: Record<string, any> | undefined): string[] {
@@ -182,13 +203,15 @@ function casePhotoPaths(caseId: string, data: Record<string, any> | undefined): 
   return Array.from(new Set(list)).slice(0, MAX_CASE_PHOTOS);
 }
 
-// 由 Storage 讀相（保持次序）；讀唔到或者格式唔啱嘅就略過
+// 由 Storage 讀相；pos = 喺 photos[] 嘅位置（0 = 封面）。讀唔到或者格式唔啱嘅就略過
+type LoadedPhoto = { pos: number; data: string };
+
 async function loadCasePhotos(
   bucket: NonNullable<ReturnType<typeof getAdminBucket>>,
   paths: string[]
-): Promise<string[]> {
+): Promise<LoadedPhoto[]> {
   const results = await Promise.all(
-    paths.map(async (p) => {
+    paths.map(async (p, pos): Promise<LoadedPhoto | null> => {
       try {
         const file = bucket.file(p);
         const [meta] = await file.getMetadata();
@@ -197,14 +220,14 @@ async function loadCasePhotos(
           return null;
         }
         const [buffer] = await file.download();
-        return buffer.toString("base64");
+        return { pos, data: buffer.toString("base64") };
       } catch (err: any) {
         if (err?.code !== 404) console.warn(`[Analyze] 讀取相片失敗 ${p}:`, err?.message);
         return null;
       }
     })
   );
-  return results.filter((x): x is string => x !== null);
+  return results.filter((x): x is LoadedPhoto => x !== null);
 }
 
 function isFreshCase(data: Record<string, any> | undefined): boolean {
@@ -836,7 +859,8 @@ function languageForPrompt(lang: string): string {
 }
 
 async function runGeminiAnalysis(
-  images: string[],
+  images: LoadedPhoto[],
+  totalPhotos: number,
   animalType: unknown,
   description: unknown,
   lang: string
@@ -858,7 +882,7 @@ async function runGeminiAnalysis(
   // lang 已經過 LANG_RE 驗證，可以安全放入 prompt
   const promptText = `
 You are the emergency veterinarian and rescue coordinator AI for "PawPulse", an urgent stray animal rescue platform used by citizens and rescue NGOs worldwide.
-Analyze the ${n} photo(s) above of a stray or injured animal reported by a citizen.
+Analyze the ${n} photo(s) above of a stray or injured animal reported by a citizen. The photos are numbered 1 to ${n} in the order they appear.
 All photos come from the same report and should show the SAME animal, possibly from different angles or distances. Combine the evidence from every photo — an injury visible in only one photo still counts.
 If the photos clearly show different animals, analyze the animal in photo 1 and mention this in appearanceDescription.
 User provided context:
@@ -880,6 +904,7 @@ Write every text field in ${languageForPrompt(lang)}. If you cannot write that l
 6. First-aid advice for citizens on the scene: 3-4 safe, actionable instructions. Do not reference any country-specific hotline numbers.
 7. Handling precautions for rescuers and citizens.
 8. Confidence score between 0.70 and 0.99.
+9. Sensitive content check: in sensitivePhotoNumbers, list the photo numbers (1 to ${n}) that show graphic or disturbing content, such as visible blood, open or bleeding wounds, exposed tissue or bone, severe trauma or deformity, a dead animal, maggots or parasite infestation, or close-up bodily fluids. Return an empty array only if you are confident none of the photos is disturbing. When unsure, include the photo.
 
 Ensure output is strictly JSON conforming to the response schema.
 `;
@@ -890,7 +915,7 @@ Ensure output is strictly JSON conforming to the response schema.
       contents: {
         // 全部相放喺同一個 request，最後先放文字指示
         parts: [
-          ...images.map((data) => ({ inlineData: { mimeType: "image/jpeg", data } })),
+          ...images.map((img) => ({ inlineData: { mimeType: "image/jpeg", data: img.data } })),
           { text: promptText },
         ],
       },
@@ -909,11 +934,13 @@ Ensure output is strictly JSON conforming to the response schema.
             firstAidAdvice: { type: Type.ARRAY, items: { type: Type.STRING } },
             handlingPrecautions: { type: Type.ARRAY, items: { type: Type.STRING } },
             confidenceScore: { type: Type.NUMBER },
+            sensitivePhotoNumbers: { type: Type.ARRAY, items: { type: Type.INTEGER } },
           },
           required: [
             "identifiedSpecies", "estimatedBreed", "appearanceDescription",
             "apparentInjuries", "urgencyLevel", "urgencyReason",
             "rescueEquipment", "firstAidAdvice", "handlingPrecautions",
+            "sensitivePhotoNumbers",
           ],
         },
       },
@@ -928,6 +955,21 @@ Ensure output is strictly JSON conforming to the response schema.
     // 唔直接信 AI 輸出：逐個欄位檢查型別同長度先寫入資料庫
     const p = JSON.parse(rawText);
     const conf = Number(p.confidenceScore);
+
+    // 敏感相片：AI 用 1..n 計，轉返做案件 photos[] 嘅位置（0 = 封面）
+    const sensitive = new Set<number>();
+    if (Array.isArray(p.sensitivePhotoNumbers)) {
+      for (const x of p.sensitivePhotoNumbers) {
+        const k = Number(x);
+        if (Number.isInteger(k) && k >= 1 && k <= n) sensitive.add(images[k - 1].pos);
+      }
+    } else {
+      images.forEach((img) => sensitive.add(img.pos)); // AI 冇答：全部當有問題
+    }
+    // 讀唔到嘅相 AI 冇睇過，當有問題
+    const seen = new Set(images.map((img) => img.pos));
+    for (let i = 0; i < totalPhotos; i++) if (!seen.has(i)) sensitive.add(i);
+
     return {
       identifiedSpecies: cleanStr(p.identifiedSpecies, 100),
       estimatedBreed: cleanStr(p.estimatedBreed, 100),
@@ -939,6 +981,7 @@ Ensure output is strictly JSON conforming to the response schema.
       firstAidAdvice: cleanList(p.firstAidAdvice),
       handlingPrecautions: cleanList(p.handlingPrecautions),
       confidenceScore: Number.isFinite(conf) ? Math.min(0.99, Math.max(0, conf)) : 0.8,
+      sensitivePhotos: Array.from(sensitive).sort((a, b) => a - b),
       analyzedAt: new Date().toISOString(),
     };
   } catch (err) {
@@ -973,7 +1016,8 @@ app.post("/api/cases/:caseId/analyze", aiRateLimitMiddleware, async (req: Reques
     }
 
     // 先讀相（由 Storage 讀，唔接受前端傳圖），讀唔到就唔好扣分析次數同每日額度
-    const images = await loadCasePhotos(bucket, casePhotoPaths(caseId, data));
+    const paths = casePhotoPaths(caseId, data);
+    const images = await loadCasePhotos(bucket, paths);
     if (images.length === 0) {
       res.status(404).json({ error: "找不到案件相片" });
       return;
@@ -992,7 +1036,7 @@ app.post("/api/cases/:caseId/analyze", aiRateLimitMiddleware, async (req: Reques
     }
 
     const lang = resolveLang(req, req.body?.lang);
-    const result = await runGeminiAnalysis(images, data?.animalType, data?.description, lang);
+    const result = await runGeminiAnalysis(images, paths.length, data?.animalType, data?.description, lang);
     if (!result) {
       res.json({ noResponse: true });
       return;
@@ -1206,13 +1250,118 @@ async function requireAdmin(req: Request, res: Response): Promise<AuthInfo | nul
 
 // 產生「設定密碼」連結；如果 continue URL 未加入 Firebase 授權網域，就退而求其次唔帶 URL
 async function makeSetPasswordLink(email: string, baseUrl: string): Promise<string> {
-  try {
-    return await getAdminAuth().generatePasswordResetLink(email, { url: baseUrl });
-  } catch (err: any) {
-    console.warn("[NGO account] continue URL 不可用，改用預設連結:", err?.code || err?.message);
-    return await getAdminAuth().generatePasswordResetLink(email);
+  // Firebase 只負責整連結；抽出 oobCode 駁去自己嘅 /set-password 頁（順便填姓名同帳戶名）
+  // 唔再傳 continue URL，所以唔會再撞 unauthorized-continue-uri
+  const raw = await getAdminAuth().generatePasswordResetLink(email);
+  const oobCode = new URL(raw).searchParams.get("oobCode");
+  if (!oobCode) throw new Error("generatePasswordResetLink: oobCode missing");
+  const base = baseUrl.replace(/\/+$/, "");
+  return `${base}/set-password?oobCode=${encodeURIComponent(oobCode)}`;
+}
+
+// ---------- 會員資料（5A）----------
+// userprofiles/{uid}：姓、名、帳戶名（姓名唔公開）
+// usernames/{帳戶名細楷}：防重複；transaction 保證兩個人唔會同時搶到同一個名
+const MEMBER_USERNAME_RE = /^(?=.*[\p{L}\p{N}])[\p{L}\p{M}\p{N}_\-.!@#$%&*+=?~^()[\]]{2,30}$/u;
+const RESERVED_USERNAMES = new Set([
+  "admin", "administrator", "pawpulse", "ngo", "system", "support", "root", "moderator", "official",
+  "管理員", "管理员", "系統", "系统", "官方", "客服", "版主",
+]);
+const USERNAME_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000; // 30 日只可以改 1 次帳戶名
+
+class ProfileSetupError extends Error {
+  status: number;
+  code: string;
+  nextChangeAt?: number;
+  constructor(status: number, code: string, nextChangeAt?: number) {
+    super(code);
+    this.status = status;
+    this.code = code;
+    this.nextChangeAt = nextChangeAt;
   }
 }
+
+app.post("/api/profile", emailIpRateLimitMiddleware, async (req: Request, res: Response) => {
+  const authInfo = await getAuthInfo(req);
+  if (!authInfo) {
+    res.status(401).json({ error: "請先登入", code: "unauthenticated" });
+    return;
+  }
+
+  const firstName = cleanStr(req.body?.firstName, 50).trim();
+  const lastName = cleanStr(req.body?.lastName, 50).trim();
+  const username = cleanStr(req.body?.username, 60).normalize("NFKC").trim();
+  const key = username.toLowerCase();
+
+  if (!firstName || !lastName) {
+    res.status(400).json({ error: "請填寫姓同名", code: "name_required" });
+    return;
+  }
+  // __xxx__ 係 Firestore 保留嘅文件 ID 格式
+  if (!MEMBER_USERNAME_RE.test(username) || RESERVED_USERNAMES.has(key) || /^__.*__$/.test(key)) {
+    res.status(400).json({ error: "帳戶名格式不正確", code: "username_invalid" });
+    return;
+  }
+
+  const db = getAdminDb();
+  const profileRef = db.collection("userprofiles").doc(authInfo.uid);
+  const nameRef = db.collection("usernames").doc(key);
+
+    try {
+    let didRename = false;
+    await db.runTransaction(async (tx) => {
+
+      const [profileSnap, nameSnap] = await Promise.all([tx.get(profileRef), tx.get(nameRef)]);
+
+      const oldUsername = profileSnap.exists ? profileSnap.get("username") : null;
+      const oldKey = profileSnap.exists ? profileSnap.get("usernameLower") : null;
+      // 第一次設定唔計；之後改名（包括淨係改大細楷）要隔 30 日
+      const isRename = typeof oldUsername === "string" && oldUsername !== "" && oldUsername !== username;
+      didRename = isRename;
+      if (isRename) {
+        const last = profileSnap.get("usernameChangedAt");
+        if (last instanceof Timestamp) {
+          const next = last.toMillis() + USERNAME_COOLDOWN_MS;
+          if (Date.now() < next) throw new ProfileSetupError(429, "username_cooldown", next);
+        }
+      }
+      if (nameSnap.exists && nameSnap.get("uid") !== authInfo.uid) {
+        throw new ProfileSetupError(409, "username_taken");
+      }
+
+      const now = FieldValue.serverTimestamp();
+      // 舊名即刻釋放
+      if (isRename && typeof oldKey === "string" && oldKey !== "" && oldKey !== key) {
+        tx.delete(db.collection("usernames").doc(oldKey));
+      }
+      tx.set(nameRef, { uid: authInfo.uid, username, createdAt: now }, { merge: true });
+      tx.set(
+        profileRef,
+        {
+          firstName,
+          lastName,
+          username,
+          usernameLower: key,
+          email: authInfo.email ?? null,
+          updatedAt: now,
+          ...(profileSnap.exists ? {} : { createdAt: now, usernameChangedAt: null }),
+          ...(isRename ? { usernameChangedAt: now } : {}),
+        },
+        { merge: true }
+      );
+    });
+
+    if (didRename) await renameCommentAuthor(authInfo.uid, username);
+    res.json({ success: true, profile: { firstName, lastName, username } });
+  } catch (err) {
+    if (err instanceof ProfileSetupError) {
+      res.status(err.status).json({ error: err.code, code: err.code, nextChangeAt: err.nextChangeAt ?? null });
+      return;
+    }
+    console.error("[Profile] save failed:", (err as any)?.code, (err as Error).message);
+    res.status(500).json({ error: "儲存會員資料失敗", code: "save_failed" });
+  }
+});
 
 app.post("/api/admin/ngo-accounts", adminRateLimitMiddleware, async (req: Request, res: Response) => {
   const authInfo = await requireAdmin(req, res);
@@ -1399,6 +1548,12 @@ app.post("/api/cases/:caseId/accept", caseActionRateLimitMiddleware, async (req:
       acceptedAt: new Date().toISOString(),
     };
 
+    const pre = await getAdminDb().collection("case").doc(String(req.params.caseId)).get();
+    if (pre.data()?.status === "pending_deletion") {
+      res.status(409).json({ error: "此案件正等待管理員處理刪除申請", code: "pending_deletion" });
+      return;
+    }
+
     const outcome = await db.runTransaction(async (tx) => {
       const snap = await tx.get(caseRef);
       if (!snap.exists) return { code: 404 as const };
@@ -1538,6 +1693,630 @@ app.post("/api/cases/:caseId/status", caseActionRateLimitMiddleware, async (req:
   }
 });
 
+// ---------- 報案人修改案件（5B-1）----------
+// 舊相全部保留；新相只可以放喺同一個資料夾嘅空位（0–4.jpg），總數最多 5 張
+
+// 報案人 = usercases/{uid} 有呢宗案件，或者報案時登入咗嘅 uid
+async function isCaseReporter(uid: string, caseId: string): Promise<boolean> {
+  const db = getAdminDb();
+  const [uc, contact] = await Promise.all([
+    db.collection("usercases").doc(uid).get(),
+    db.collection("case").doc(caseId).collection("private").doc("contact").get(),
+  ]);
+  const ids = uc.data()?.caseIds;
+  if (Array.isArray(ids) && ids.includes(caseId)) return true;
+  return contact.data()?.createdByUid === uid;
+}
+
+function cleanLocation(v: any): { lat: number; lng: number; address: string; district?: string } | null {
+  const lat = Number(v?.lat);
+  const lng = Number(v?.lng);
+  const address = cleanStr(v?.address, 300);
+  const district = cleanStr(v?.district, 100);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || !address) {
+    return null;
+  }
+  return { lat, lng, address, ...(district && { district }) };
+}
+
+// 網址由 server 用 Storage metadata 自己砌，唔信前端傳嚟嘅網址
+async function storedPhotoEntry(
+  bucket: NonNullable<ReturnType<typeof getAdminBucket>>,
+  p: string
+): Promise<{ url: string; path: string } | null> {
+  try {
+    const [meta] = await bucket.file(p).getMetadata();
+    if (meta.contentType !== "image/jpeg" || Number(meta.size) >= MAX_PHOTO_BYTES) return null;
+    const token = String(meta.metadata?.firebaseStorageDownloadTokens ?? "").split(",")[0];
+    if (!token) return null;
+    const url =
+      `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/` +
+      `${encodeURIComponent(p)}?alt=media&token=${token}`;
+    return { url, path: p };
+  } catch {
+    return null;
+  }
+}
+
+app.post("/api/cases/:caseId/edit", caseActionRateLimitMiddleware, async (req: Request, res: Response) => {
+  const caseId = String(req.params.caseId ?? "");
+  if (!CASE_ID_RE.test(caseId)) {
+    res.status(400).json({ error: "bad_input", code: "bad_input" });
+    return;
+  }
+  const authInfo = await getAuthInfo(req);
+  if (!authInfo) {
+    res.status(401).json({ error: "unauthenticated", code: "unauthenticated" });
+    return;
+  }
+  const bucket = getAdminBucket();
+  if (!bucket) {
+    res.status(503).json({ error: "相片儲存服務未設定" });
+    return;
+  }
+
+  const b = req.body ?? {};
+  const title = cleanStr(b.title, 200);
+  const description = typeof b.description === "string" ? b.description.trim().slice(0, 2000) : "";
+  const animalType = typeof b.animalType === "string" && ALLOWED_ANIMAL_HINTS.has(b.animalType) ? b.animalType : null;
+  const customAnimalName = animalType === "other" ? cleanStr(b.customAnimalName, 100) : "";
+  const tags: string[] = Array.isArray(b.tags)
+    ? Array.from(new Set((b.tags as unknown[]).filter((x): x is string => typeof x === "string" && TAG_RE.test(x)))).slice(0, 10)
+    : [];
+  const location = cleanLocation(b.location);
+  const rawPaths: unknown[] = Array.isArray(b.newPhotoPaths) ? b.newPhotoPaths : [];
+
+  if (!title || !description || !animalType || !location || rawPaths.length > MAX_CASE_PHOTOS) {
+    res.status(400).json({ error: "bad_input", code: "bad_input" });
+    return;
+  }
+
+  const folder = `animal-reports/${caseId}/`;
+  const newPaths = Array.from(
+    new Set(
+      rawPaths.filter(
+        (p): p is string => typeof p === "string" && p.startsWith(folder) && /^[0-4]\.jpg$/.test(p.slice(folder.length))
+      )
+    )
+  );
+  if (newPaths.length !== rawPaths.length) {
+    res.status(400).json({ error: "bad_photos", code: "bad_photos" });
+    return;
+  }
+
+  try {
+    if (!(await isCaseReporter(authInfo.uid, caseId))) {
+      res.status(403).json({ error: "not_owner", code: "not_owner" });
+      return;
+    }
+
+    // 新相要真係喺 Storage 入面（Storage 讀寫唔放入 transaction）
+    const newEntries = await Promise.all(newPaths.map((p) => storedPhotoEntry(bucket, p)));
+    if (newEntries.some((e) => !e)) {
+      res.status(400).json({ error: "bad_photos", code: "bad_photos" });
+      return;
+    }
+
+    const db = getAdminDb();
+    const caseRef = db.collection("case").doc(caseId);
+
+    const outcome = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(caseRef);
+      if (!snap.exists) return { code: "not_found" as const };
+      const d = snap.data() ?? {};
+      if (d.acceptedBy) return { code: "case_accepted" as const };
+      if (d.status !== "pending") return { code: "case_locked" as const };
+      const created = d.createdAt instanceof Timestamp ? d.createdAt.toMillis() : 0;
+      if (!created || Date.now() - created > EDIT_WINDOW_MS) return { code: "edit_expired" as const };
+      if ((Number(d.editCount) || 0) >= MAX_REPORTER_EDITS) return { code: "edit_used" as const };
+
+      // 舊相全部保留（次序不變，封面不變）
+      const ownPaths = casePhotoPaths(caseId, d);
+      const keep = (Array.isArray(d.photos) ? d.photos : [])
+        .filter((p: any) => typeof p?.url === "string" && ownPaths.includes(p?.path))
+        .map((p: any) => ({ url: p.url as string, path: p.path as string }));
+      const added = newEntries as { url: string; path: string }[];
+      if (added.some((a) => keep.some((k: { path: string }) => k.path === a.path)) || keep.length + added.length > MAX_CASE_PHOTOS) {
+        return { code: "bad_photos" as const };
+      }
+      const photos = [...keep, ...added];
+      if (photos.length === 0) return { code: "bad_photos" as const };
+
+      // 第 1 版放 private（只有 admin／接手 NGO 讀到）
+      tx.set(caseRef.collection("private").doc("firstVersion"), {
+        title: d.title ?? null,
+        animalType: d.animalType ?? null,
+        customAnimalName: d.customAnimalName ?? null,
+        tags: d.tags ?? null,
+        description: d.description ?? null,
+        location: d.location ?? null,
+        photos: keep,
+        photoUrl: d.photoUrl ?? null,
+        storagePath: d.storagePath ?? null,
+        urgency: d.urgency ?? null,
+        aiAnalysis: d.aiAnalysis ?? null,
+        savedAt: FieldValue.serverTimestamp(),
+      });
+
+      tx.update(caseRef, {
+        title,
+        animalType,
+        customAnimalName: customAnimalName || FieldValue.delete(),
+        tags: tags.length ? tags : FieldValue.delete(),
+        description,
+        location,
+        photos,
+        photoUrl: photos[0].url,
+        storagePath: photos[0].path,
+        editCount: FieldValue.increment(1),
+        editedAt: new Date().toISOString(),
+        // 新內容未分析之前唔好留住舊結果
+        aiAnalysis: null,
+        geminiResponse: null,
+        urgency: "P1",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return { code: "ok" as const, photos };
+    });
+
+    if (outcome.code !== "ok") {
+      const status = outcome.code === "not_found" ? 404 : outcome.code === "bad_photos" ? 400 : 409;
+      res.status(status).json({ error: outcome.code, code: outcome.code });
+      return;
+    }
+
+    // 再問 Gemini（失敗／超額度都唔影響修改結果）
+    let analysis: AIAnalysisResult | null = null;
+    if (consumeDailyAiQuota()) {
+      const paths = outcome.photos.map((p) => p.path);
+      const images = await loadCasePhotos(bucket, paths);
+      const lang = resolveLang(req, b.lang);
+      if (images.length > 0) analysis = await runGeminiAnalysis(images, paths.length, animalType, description, lang);
+      if (analysis) {
+        await caseRef.update({
+          aiAnalysis: analysis,
+          geminiResponse: analysis,
+          urgency: analysis.urgencyLevel,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    } else {
+      console.warn(`[Edit] 已達每日 AI 上限 ${AI_DAILY_LIMIT}，案件 ${caseId} 修改後未分析`);
+    }
+
+    console.log(`[Edit] case ${caseId} edited by reporter ${authInfo.uid} (+${newPaths.length} photos)`);
+    res.json({ success: true, urgency: analysis?.urgencyLevel ?? "P1", noResponse: !analysis });
+  } catch (err) {
+    console.error("[Edit] error:", (err as any)?.code, (err as Error).message);
+    res.status(500).json({ error: "save_failed", code: "save_failed" });
+  }
+});
+
+// ---------- 管理員電郵清單（5B-2 / 5B-3 共用）----------
+// 來源：adminuser 文件嘅 email 欄位 + 環境變數 ADMIN_NOTIFY_EMAIL（可選，逗號分隔）
+async function getAdminEmails(): Promise<string[]> {
+  const out = new Set<string>();
+  for (const e of String(process.env.ADMIN_NOTIFY_EMAIL ?? "").split(",")) {
+    const v = e.trim().toLowerCase();
+    if (EMAIL_RE.test(v)) out.add(v);
+  }
+  try {
+    const snap = await getAdminDb().collection("adminuser").get();
+    snap.forEach((d) => {
+      const v = String(d.data()?.email ?? "").trim().toLowerCase();
+      if (EMAIL_RE.test(v)) out.add(v);
+    });
+  } catch (err) {
+    console.warn("[AdminEmails] read failed:", (err as Error).message);
+  }
+  return Array.from(out);
+}
+
+// ---------- 報案人申請刪除（5B-2）----------
+// 報案人冇刪除權；只會將狀態改做 pending_deletion，再寄信通知 admin
+app.post("/api/cases/:caseId/delete-request", caseActionRateLimitMiddleware, async (req: Request, res: Response) => {
+  const caseId = String(req.params.caseId ?? "");
+  if (!CASE_ID_RE.test(caseId)) {
+    res.status(400).json({ error: "bad_input", code: "bad_input" });
+    return;
+  }
+  const authInfo = await getAuthInfo(req);
+  if (!authInfo) {
+    res.status(401).json({ error: "unauthenticated", code: "unauthenticated" });
+    return;
+  }
+
+  const b = req.body ?? {};
+  const reason = typeof b.reason === "string" && DELETE_REASONS.has(b.reason) ? b.reason : null;
+  const note = typeof b.note === "string" ? b.note.trim().slice(0, 500) : "";
+  if (!reason || (reason === "other" && !note)) {
+    res.status(400).json({ error: "bad_input", code: "bad_input" });
+    return;
+  }
+
+  try {
+    if (!(await isCaseReporter(authInfo.uid, caseId))) {
+      res.status(403).json({ error: "not_owner", code: "not_owner" });
+      return;
+    }
+
+    const db = getAdminDb();
+    const caseRef = db.collection("case").doc(caseId);
+    const requestedAt = new Date().toISOString();
+
+    const outcome = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(caseRef);
+      if (!snap.exists) return { code: "not_found" as const };
+      const d = snap.data() ?? {};
+      if (d.status === "pending_deletion") return { code: "already_requested" as const };
+      if (d.acceptedBy) return { code: "case_accepted" as const };
+      if (d.status !== "pending") return { code: "case_locked" as const };
+
+      tx.update(caseRef, {
+        status: "pending_deletion",
+        deletionRequest: {
+          reason,
+          note: note || null,
+          requestedByUid: authInfo.uid,
+          requestedAt,
+          prevStatus: d.status,
+        },
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return { code: "ok" as const, title: String(d.title ?? "") };
+    });
+
+    if (outcome.code !== "ok") {
+      const status = outcome.code === "not_found" ? 404 : 409;
+      res.status(status).json({ error: outcome.code, code: outcome.code });
+      return;
+    }
+
+    // 寄信俾 admin（失敗唔影響申請結果）
+    try {
+      const to = await getAdminEmails();
+      if (to.length === 0) {
+        console.warn(`[DeleteRequest] 搵唔到 admin 電郵，案件 ${caseId} 冇寄通知`);
+      } else {
+        const base = String(process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "");
+        const link = base ? `${base}/?caseId=${encodeURIComponent(caseId)}` : `（案件編號：${caseId}）`;
+        const text = [
+          "報案人申請刪除案件，請登入管理員帳戶處理。",
+          "",
+          `案件編號：${caseId}`,
+          `標題：${outcome.title}`,
+          `原因：${DELETE_REASON_ZH[reason] ?? reason}`,
+          `補充說明：${note || "（冇）"}`,
+          `申請人：${authInfo.email || authInfo.uid}`,
+          `申請時間：${requestedAt}`,
+          "",
+          "打開以下連結，喺案件詳情揀「確認刪除」或者「還原案件」：",
+          link,
+        ].join("\n");
+        await sendMail(to.join(", "), `[PawPulse] 刪除申請：${caseId}`, text);
+      }
+    } catch (err) {
+      console.error("[DeleteRequest] email failed:", (err as Error).message);
+    }
+
+    console.log(`[DeleteRequest] case ${caseId} → pending_deletion (${reason}) by ${authInfo.uid}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[DeleteRequest] error:", (err as any)?.code, (err as Error).message);
+    res.status(500).json({ error: "save_failed", code: "save_failed" });
+  }
+});
+
+// ---------- 5D：案件留言 ----------
+// 留言只可以經 server 寫（rules 禁止 client 寫），身份同內容全部由 server 檢查
+const COMMENT_MAX_LEN = 1000;
+const COMMENT_ID_RE = /^[A-Za-z0-9]{1,40}$/;
+const commentRateLimitMiddleware = makeRateLimit("comment", 10, 60, "留言過於頻繁，請稍後再試");
+
+// 保留換行，刪走其他控制字元；連續多過 2 個空行縮返做 2 個
+function cleanCommentText(v: unknown): string {
+  if (typeof v !== "string") return "";
+  return v
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// 改名之後，將呢個會員所有舊留言嘅名一齊更新（NGO / admin 留言唔用帳戶名，唔使改）
+// 需要 comments.uid 嘅「集合群組」索引；未建索引會失敗，但只係 log 警告，唔影響改名本身
+async function renameCommentAuthor(uid: string, username: string): Promise<void> {
+  try {
+    const db = getAdminDb();
+    const snap = await db.collectionGroup("comments").where("uid", "==", uid).get();
+    if (snap.empty) return;
+    const writer = db.bulkWriter();
+    snap.docs.forEach((d) => {
+      if (d.data().role === "user") writer.update(d.ref, { authorName: username });
+    });
+    await writer.close();
+  } catch (err) {
+    console.warn("[Comments] rename update failed:", err);
+  }
+}
+
+app.post("/api/cases/:caseId/comments", commentRateLimitMiddleware, async (req: Request, res: Response) => {
+  try {
+    const caseId = String(req.params.caseId || "");
+    if (!CASE_ID_RE.test(caseId)) {
+      res.status(400).json({ error: "案件編號不正確", code: "not_found" });
+      return;
+    }
+
+    const authInfo = await getAuthInfo(req);
+    if (!authInfo) {
+      res.status(401).json({ error: "請先登入", code: "login_required" });
+      return;
+    }
+
+    const text = cleanCommentText(req.body?.text);
+    if (!text) {
+      res.status(400).json({ error: "留言不可以空白", code: "empty" });
+      return;
+    }
+    if (text.length > COMMENT_MAX_LEN) {
+      res.status(400).json({ error: "留言太長", code: "too_long" });
+      return;
+    }
+
+    const rawParent = req.body?.parentId;
+    const parentId = rawParent === undefined || rawParent === null || rawParent === "" ? null : String(rawParent);
+    if (parentId !== null && !COMMENT_ID_RE.test(parentId)) {
+      res.status(400).json({ error: "回覆的留言不存在", code: "bad_parent" });
+      return;
+    }
+
+    const db = getAdminDb();
+    const caseRef = db.collection("case").doc(caseId);
+    const caseSnap = await caseRef.get();
+    if (!caseSnap.exists) {
+      res.status(404).json({ error: "找不到案件", code: "not_found" });
+      return;
+    }
+    if (caseSnap.data()?.status === "pending_deletion" && authInfo.role !== "admin") {
+      res.status(409).json({ error: "此案件正等待管理員處理刪除申請", code: "pending_deletion" });
+      return;
+    }
+
+    // 顯示名：會員用帳戶名；NGO 用機構名；admin 由前端顯示「PawPulse 管理員」
+    let authorName: string | null = null;
+    if (authInfo.role === "user") {
+      const authUser = await getAdminAuth().getUser(authInfo.uid);
+      if (!authUser.emailVerified) {
+        res.status(403).json({ error: "請先完成電郵驗證", code: "email_unverified" });
+        return;
+      }
+      const profileSnap = await db.collection("userprofiles").doc(authInfo.uid).get();
+      const username = profileSnap.exists ? profileSnap.data()?.username : null;
+      if (typeof username !== "string" || !username) {
+        res.status(403).json({ error: "請先完成會員資料", code: "profile_required" });
+        return;
+      }
+      authorName = username;
+    } else if (authInfo.role === "ngo" && authInfo.ngoId) {
+      const ngoSnap = await db.collection("ngodatail").doc(authInfo.ngoId).get();
+      const ngoName = ngoSnap.exists ? ngoSnap.data()?.name : null;
+      authorName = typeof ngoName === "string" && ngoName ? ngoName : null;
+    }
+
+    // 回覆只可以掛喺同一宗案件嘅「主留言」下面（得一層）
+    if (parentId) {
+      const parentSnap = await caseRef.collection("comments").doc(parentId).get();
+      if (!parentSnap.exists || parentSnap.data()?.parentId) {
+        res.status(400).json({ error: "回覆的留言不存在", code: "bad_parent" });
+        return;
+      }
+    }
+
+    // 報案人標籤：登入咗報案（createdByUid），或者案件已連結到佢個帳戶（usercases）
+    const [contactSnap, userCasesSnap] = await Promise.all([
+      caseRef.collection("private").doc("contact").get(),
+      db.collection("usercases").doc(authInfo.uid).get(),
+    ]);
+    const linkedIds = userCasesSnap.data()?.caseIds;
+    const isReporter =
+      contactSnap.data()?.createdByUid === authInfo.uid ||
+      (Array.isArray(linkedIds) && linkedIds.includes(caseId));
+
+    const ref = caseRef.collection("comments").doc();
+    await ref.set({
+      id: ref.id,
+      uid: authInfo.uid,
+      role: authInfo.role,
+      authorName,
+      ngoId: authInfo.role === "ngo" ? authInfo.ngoId : null,
+      isReporter,
+      text,
+      parentId,
+      deleted: false,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    res.json({ success: true, id: ref.id });
+  } catch (err) {
+    console.error("[Comments] post failed:", err);
+    res.status(500).json({ error: "留言失敗", code: "unknown" });
+  }
+});
+
+app.delete("/api/cases/:caseId/comments/:commentId", commentRateLimitMiddleware, async (req: Request, res: Response) => {
+  try {
+    const caseId = String(req.params.caseId || "");
+    const commentId = String(req.params.commentId || "");
+    if (!CASE_ID_RE.test(caseId) || !COMMENT_ID_RE.test(commentId)) {
+      res.status(400).json({ error: "找不到留言", code: "not_found" });
+      return;
+    }
+
+    const authInfo = await getAuthInfo(req);
+    if (!authInfo) {
+      res.status(401).json({ error: "請先登入", code: "login_required" });
+      return;
+    }
+
+    const ref = getAdminDb().collection("case").doc(caseId).collection("comments").doc(commentId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      res.status(404).json({ error: "找不到留言", code: "not_found" });
+      return;
+    }
+    const data = snap.data() || {};
+    if (data.uid !== authInfo.uid && authInfo.role !== "admin") {
+      res.status(403).json({ error: "無權刪除此留言", code: "forbidden" });
+      return;
+    }
+    if (data.deleted) {
+      res.json({ success: true });
+      return;
+    }
+
+    // 軟刪除：清空內容但保留文件，下面嘅回覆唔會無咗主留言
+    await ref.update({
+      deleted: true,
+      text: "",
+      deletedAt: FieldValue.serverTimestamp(),
+      deletedBy: data.uid === authInfo.uid ? "author" : "admin",
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[Comments] delete failed:", err);
+    res.status(500).json({ error: "刪除留言失敗", code: "unknown" });
+  }
+});
+
+
+// ---------- admin 還原待刪除案件 ----------
+app.post("/api/admin/cases/:caseId/restore", adminRateLimitMiddleware, async (req: Request, res: Response) => {
+  const caseId = String(req.params.caseId ?? "");
+  if (!CASE_ID_RE.test(caseId)) {
+    res.status(400).json({ error: "bad_input", code: "bad_input" });
+    return;
+  }
+  const authInfo = await getAuthInfo(req);
+  if (authInfo?.role !== "admin") {
+    res.status(403).json({ error: "只有管理員可以還原案件", code: "forbidden" });
+    return;
+  }
+  try {
+    const db = getAdminDb();
+    const caseRef = db.collection("case").doc(caseId);
+    const code = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(caseRef);
+      if (!snap.exists) return "not_found";
+      const d = snap.data() ?? {};
+      if (d.status !== "pending_deletion") return "not_pending_deletion";
+      const prev = d.deletionRequest?.prevStatus;
+      tx.update(caseRef, {
+        status: NORMAL_STATUSES.includes(prev) ? prev : "pending",
+        deletionRequest: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return "ok";
+    });
+    if (code !== "ok") {
+      res.status(code === "not_found" ? 404 : 409).json({ error: code, code });
+      return;
+    }
+    console.log(`[Restore] case ${caseId} restored by admin ${authInfo.uid}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[Restore] error:", (err as Error).message);
+    res.status(500).json({ error: "save_failed", code: "save_failed" });
+  }
+});
+
+// ---------- 報案人聯絡管理員（5B-3）----------
+// 訊息先存入 adminmessages（寄信失敗都有紀錄），再寄信俾所有 admin
+app.post("/api/cases/:caseId/contact-admin", emailIpRateLimitMiddleware, async (req: Request, res: Response) => {
+  const caseId = String(req.params.caseId ?? "");
+  if (!CASE_ID_RE.test(caseId)) {
+    res.status(400).json({ error: "bad_input", code: "bad_input" });
+    return;
+  }
+  const authInfo = await getAuthInfo(req);
+  if (!authInfo) {
+    res.status(401).json({ error: "unauthenticated", code: "unauthenticated" });
+    return;
+  }
+
+  const b = req.body ?? {};
+  const category = typeof b.category === "string" && CONTACT_CATEGORIES.has(b.category) ? b.category : null;
+  const message = typeof b.message === "string" ? b.message.trim().slice(0, 1000) : "";
+  if (!category || !message) {
+    res.status(400).json({ error: "bad_input", code: "bad_input" });
+    return;
+  }
+
+  try {
+    if (!(await isCaseReporter(authInfo.uid, caseId))) {
+      res.status(403).json({ error: "not_owner", code: "not_owner" });
+      return;
+    }
+
+    const db = getAdminDb();
+    const snap = await db.collection("case").doc(caseId).get();
+    if (!snap.exists) {
+      res.status(404).json({ error: "not_found", code: "not_found" });
+      return;
+    }
+    const d = snap.data() ?? {};
+    const sentAt = new Date().toISOString();
+
+    const ref = await db.collection("adminmessages").add({
+      caseId,
+      uid: authInfo.uid,
+      email: authInfo.email ?? null,
+      category,
+      message,
+      handled: false,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    // 寄信俾 admin（失敗唔影響結果，訊息已經存咗）
+    try {
+      const to = await getAdminEmails();
+      if (to.length === 0) {
+        console.warn(`[ContactAdmin] 搵唔到 admin 電郵，訊息 ${ref.id} 冇寄通知`);
+      } else {
+        const base = String(process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "");
+        const link = base ? `${base}/?caseId=${encodeURIComponent(caseId)}` : `（案件編號：${caseId}）`;
+        const text = [
+          "報案人透過「聯絡管理員」發出訊息。",
+          "",
+          `類別：${CONTACT_CATEGORY_ZH[category] ?? category}`,
+          `案件編號：${caseId}`,
+          `標題：${String(d.title ?? "")}`,
+          `目前狀態：${String(d.status ?? "")}`,
+          `接手機構：${d.acceptedBy?.ngoName ? String(d.acceptedBy.ngoName) : "（未有）"}`,
+          `報案人電郵：${authInfo.email || "（冇電郵）"}（可以直接寄信回覆）`,
+          `時間：${sentAt}`,
+          `訊息編號：${ref.id}`,
+          "",
+          "內容：",
+          message,
+          "",
+          "案件連結：",
+          link,
+        ].join("\n");
+        await sendMail(to.join(", "), `[PawPulse] 聯絡管理員（${CONTACT_CATEGORY_ZH[category] ?? category}）：${caseId}`, text);
+      }
+    } catch (err) {
+      console.error("[ContactAdmin] email failed:", (err as Error).message);
+    }
+
+    console.log(`[ContactAdmin] case ${caseId} (${category}) from ${authInfo.uid}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[ContactAdmin] error:", (err as any)?.code, (err as Error).message);
+    res.status(500).json({ error: "save_failed", code: "save_failed" });
+  }
+});
+
 // ---------- 刪除案件（admin；案件、聯絡資料、相片一齊刪）----------
 
 app.delete("/api/admin/cases/:caseId", adminRateLimitMiddleware, async (req: Request, res: Response) => {
@@ -1556,6 +2335,7 @@ app.delete("/api/admin/cases/:caseId", adminRateLimitMiddleware, async (req: Req
 
     const batch = db.batch();
     batch.delete(caseRef.collection("private").doc("contact"));
+    batch.delete(caseRef.collection("private").doc("firstVersion"));
     batch.delete(caseRef);
     for (const kind of ["analyze", "email", "dispatch"]) {
       batch.delete(db.collection("serverLocks").doc(`${kind}_${caseId}`));
@@ -1569,6 +2349,10 @@ app.delete("/api/admin/cases/:caseId", adminRateLimitMiddleware, async (req: Req
     }
 
     console.log(`[Admin] Deleted case ${caseId} (contact + photos) by ${authInfo.uid}`);
+    // 連留言一齊刪（子集合唔會跟住案件文件自動刪走）
+    await getAdminDb().recursiveDelete(
+      getAdminDb().collection("case").doc(caseId).collection("comments"),
+    );
     res.json({ success: true });
   } catch (err) {
     console.error("[Admin delete] error:", (err as Error).message);

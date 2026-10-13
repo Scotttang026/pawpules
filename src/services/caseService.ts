@@ -1,9 +1,13 @@
 import {
-  collection, doc, setDoc, updateDoc, onSnapshot, query,
-  serverTimestamp, getDoc, writeBatch, DocumentData,
+  collection, doc, setDoc, updateDoc, onSnapshot, query,where,
+  serverTimestamp, getDoc, writeBatch, DocumentData, orderBy, limit
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { StrayReport, CaseStatus, NGOOrganization, AnimalType, UrgencyLevel, NgoAccount, CaseAcceptance } from '../types';
+import { 
+  StrayReport, CaseStatus, NGOOrganization, AnimalType, UrgencyLevel, 
+  NgoAccount, CaseAcceptance, LocationCoords, DeleteReason, 
+  ContactCategory, CaseComment, CommentRole 
+} from '../types';
 import { calculateDistanceKm } from '../utils/location';
 import { monitoring } from '../utils/monitoring';
 import { isCaseTag } from '../utils/caseLabels';
@@ -45,6 +49,16 @@ export function docToReport(id: string, data: DocumentData): StrayReport | null 
           .filter((p: any) => p && typeof p.url === 'string' && typeof p.path === 'string')
           .map((p: any) => ({ url: p.url, path: p.path }))
       : [],
+    editCount: typeof data.editCount === 'number' ? data.editCount : 0,
+    editedAt: typeof data.editedAt === 'string' ? data.editedAt : null,
+    deletionRequest:
+      data.deletionRequest && typeof data.deletionRequest.reason === 'string'
+        ? {
+            reason: data.deletionRequest.reason as DeleteReason,
+            note: typeof data.deletionRequest.note === 'string' ? data.deletionRequest.note : null,
+            requestedAt: String(data.deletionRequest.requestedAt ?? ''),
+          }
+        : null,
     location: { lat: loc.lat, lng: loc.lng, address: loc.address || '', district: loc.district },
     description: data.description || '',
     reporterName: '',
@@ -71,11 +85,16 @@ export function docToReport(id: string, data: DocumentData): StrayReport | null 
   };
 }
 
+// 一般用戶／訪客睇唔到「待刪除」案件；rules 都會擋，所以 query 一定要加 where，否則成個列表會被拒
+const PUBLIC_STATUSES: CaseStatus[] = ['pending', 'in_progress', 'rescued', 'closed'];
+
 export function subscribeToCases(
   onUpdate: (cases: StrayReport[]) => void,
-  onError?: (err: Error) => void
+  onError?: (err: Error) => void,
+  includeHidden = false // admin／NGO 傳 true
 ) {
-  const q = query(collection(db, CASE_COLLECTION));
+  const col = collection(db, CASE_COLLECTION);
+  const q = includeHidden ? query(col) : query(col, where('status', 'in', PUBLIC_STATUSES));
   return onSnapshot(
     q,
     (snapshot) => {
@@ -350,6 +369,67 @@ export async function acceptCase(
   return { acceptedBy: data.acceptedBy, emailSent: !!data.emailSent };
 }
 
+export interface CaseEditPayload {
+  title: string;
+  animalType: AnimalType;
+  customAnimalName: string;
+  tags: string[];
+  description: string;
+  location: LocationCoords;
+  newPhotoPaths: string[];
+  lang: string;
+}
+
+// 報案人修改案件（24 小時內 1 次）；失敗時 Error.message = server 回傳嘅 code
+export async function editCase(
+  caseId: string,
+  payload: CaseEditPayload
+): Promise<{ urgency: string; noResponse: boolean }> {
+  const res = await apiFetch(`/api/cases/${encodeURIComponent(caseId)}/edit`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.code || `HTTP ${res.status}`);
+  return { urgency: data?.urgency ?? 'P1', noResponse: !!data?.noResponse };
+}
+
+// 報案人申請刪除；失敗時 Error.message = server 回傳嘅 code
+export async function requestCaseDeletion(
+  caseId: string,
+  reason: DeleteReason,
+  note: string,
+  lang: string
+): Promise<void> {
+  const res = await apiFetch(`/api/cases/${encodeURIComponent(caseId)}/delete-request`, {
+    method: 'POST',
+    body: JSON.stringify({ reason, note, lang }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.code || `HTTP ${res.status}`);
+  monitoring.log('info', 'firestore', `Deletion requested for case #${caseId}`);
+}
+
+// admin 還原待刪除案件
+export async function restoreCase(caseId: string): Promise<void> {
+  const res = await apiFetch(`/api/admin/cases/${encodeURIComponent(caseId)}/restore`, { method: 'POST' });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.code || `HTTP ${res.status}`);
+  monitoring.log('info', 'firestore', `Restored case #${caseId}`);
+}
+
+// 報案人聯絡管理員；失敗時 Error.message = server 回傳嘅 code
+export async function contactAdmin(caseId: string, category: ContactCategory, message: string): Promise<void> {
+  const res = await apiFetch(`/api/cases/${encodeURIComponent(caseId)}/contact-admin`, {
+    method: 'POST',
+    body: JSON.stringify({ category, message }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.code || (res.status === 429 ? 'too_many' : `HTTP ${res.status}`));
+  monitoring.log('info', 'firestore', `Contact admin sent for case #${caseId}`);
+}
+
+
 // 訂閱「我的案件」ID 清單：usercases/{uid} 只有本人可讀，由 server 寫入
 export function subscribeToMyCaseIds(
   uid: string,
@@ -368,6 +448,75 @@ export function subscribeToMyCaseIds(
     },
   );
 }
+
+// ---------- 5D：案件留言 ----------
+const COMMENT_ROLES: CommentRole[] = ['user', 'ngo', 'admin'];
+
+function docToComment(id: string, data: any): CaseComment | null {
+  if (!data || typeof data.uid !== 'string') return null;
+  const ts = data.createdAt;
+  return {
+    id,
+    uid: data.uid,
+    role: COMMENT_ROLES.includes(data.role) ? data.role : 'user',
+    authorName: typeof data.authorName === 'string' ? data.authorName : null,
+    isReporter: data.isReporter === true,
+    text: typeof data.text === 'string' ? data.text : '',
+    parentId: typeof data.parentId === 'string' ? data.parentId : null,
+    deleted: data.deleted === true,
+    createdAt: ts && typeof ts.toDate === 'function' ? ts.toDate().toISOString() : '',
+  };
+}
+
+export function subscribeToComments(
+  caseId: string,
+  onChange: (comments: CaseComment[]) => void,
+  onError?: (err: unknown) => void,
+): () => void {
+  const q = query(
+    collection(db, CASE_COLLECTION, caseId, 'comments'),
+    orderBy('createdAt', 'asc'),
+    limit(500),
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      const list: CaseComment[] = [];
+      snap.forEach((d) => {
+        const c = docToComment(d.id, d.data());
+        if (c) list.push(c);
+      });
+      onChange(list);
+    },
+    (err) => {
+      console.warn('[Comments] subscribe failed:', err);
+      onError?.(err);
+    },
+  );
+}
+
+// 失敗時 ApiError 嘅 message 係 server 回傳嘅 code（例如 'email_unverified'），等前端揀翻譯
+async function throwCommentError(res: Response): Promise<never> {
+  const data = await res.json().catch(() => null);
+  throw new ApiError(typeof data?.code === 'string' ? data.code : 'unknown', res.status);
+}
+
+export async function postComment(caseId: string, text: string, parentId: string | null): Promise<void> {
+  const res = await apiFetch(`/api/cases/${encodeURIComponent(caseId)}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ text, parentId }),
+  });
+  if (!res.ok) await throwCommentError(res);
+}
+
+export async function deleteComment(caseId: string, commentId: string): Promise<void> {
+  const res = await apiFetch(
+    `/api/cases/${encodeURIComponent(caseId)}/comments/${encodeURIComponent(commentId)}`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) await throwCommentError(res);
+}
+
 
 export function rankFirestoreNGOs(
   ngos: NGOOrganization[],

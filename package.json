@@ -17,7 +17,7 @@
     "heic2any": "^0.0.4",
     "i18next": "^26.4.2",
     "i18next-browser-languagedetector": "^8.2.1",
-    "nodemailer": "^10.0.16",
+    "nodemailer": "^10.1.0",
     "react-i18next": "^17.0.16"
   },
   "devDependencies": {

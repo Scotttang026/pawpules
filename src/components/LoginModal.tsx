@@ -1,7 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, ArrowLeft, Loader2, LogIn } from 'lucide-react';
+import { X, ArrowLeft, Loader2, LogIn, UserPlus, MailCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import type { MemberProfile } from '../types';
+import { MemberProfileFields } from './MemberProfileFields';
+import {
+  EMPTY_PROFILE,
+  MEMBER_INPUT_CLASS,
+  PASSWORD_MIN,
+  memberErrorKeyOf,
+  saveMemberProfile,
+  validateProfile,
+  type MemberUiErrorKey,
+} from '../services/memberService';
 
 // 儲翻譯 key 而唔係文字，中途轉語言即刻跟住轉
 type LoginErrorKey =
@@ -11,6 +22,8 @@ type LoginErrorKey =
   | 'login.errors.invalidEmail'
   | 'login.errors.popupBlocked'
   | 'login.errors.generic';
+
+type Mode = 'login' | 'register' | 'reset';
 
 function errorKeyOf(err: unknown): LoginErrorKey | null {
   const code = (err as { code?: string })?.code ?? '';
@@ -44,14 +57,19 @@ interface LoginModalProps {
 
 export const LoginModal: React.FC<LoginModalProps> = ({ onClose, onSuccess }) => {
   const { t } = useTranslation();
-  const { signInWithGoogle, signInWithEmail, sendResetEmail } = useAuth();
+  const { signInWithGoogle, signInWithEmail, registerWithEmail, sendResetEmail } = useAuth();
 
-  const [mode, setMode] = useState<'login' | 'reset'>('login');
+  const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [password2, setPassword2] = useState('');
+  const [form, setForm] = useState<MemberProfile>(EMPTY_PROFILE);
   const [busy, setBusy] = useState(false);
-  const [errorKey, setErrorKey] = useState<LoginErrorKey | null>(null);
+  const [errorKey, setErrorKey] = useState<LoginErrorKey | MemberUiErrorKey | null>(null);
   const [resetSent, setResetSent] = useState(false);
+  // 帳戶已開但會員資料未存好（例如帳戶名撞咗）：重試時只再存資料
+  const [accountCreated, setAccountCreated] = useState(false);
+  const [registerDone, setRegisterDone] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -81,6 +99,40 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onClose, onSuccess }) =>
     signIn(() => signInWithEmail(email, password));
   };
 
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const bad = validateProfile(form);
+    if (bad) {
+      setErrorKey(bad);
+      return;
+    }
+    if (!accountCreated) {
+      if (password.length < PASSWORD_MIN) {
+        setErrorKey('member.errors.weakPassword');
+        return;
+      }
+      if (password !== password2) {
+        setErrorKey('member.errors.passwordMismatch');
+        return;
+      }
+    }
+    setBusy(true);
+    setErrorKey(null);
+    try {
+      if (!accountCreated) {
+        await registerWithEmail(email, password);
+        setAccountCreated(true);
+      }
+      await saveMemberProfile(form);
+      setRegisterDone(true);
+    } catch (err) {
+      console.warn('Register failed:', (err as { code?: string })?.code ?? err);
+      setErrorKey(memberErrorKeyOf(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -97,14 +149,22 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onClose, onSuccess }) =>
     }
   };
 
-  const switchMode = (next: 'login' | 'reset') => {
+  const switchMode = (next: Mode) => {
+    if (accountCreated) return; // 帳戶已開，唔好轉走（要完成資料）
     setMode(next);
     setErrorKey(null);
     setResetSent(false);
   };
 
-  const inputClass =
-    'w-full px-3 py-2.5 rounded-xl border border-stone-300 bg-stone-50 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500';
+  const finishRegister = () => {
+    onSuccess();
+    onClose();
+  };
+
+  const title =
+    mode === 'login' ? t('login.title') : mode === 'register' ? t('member.registerTitle') : t('login.resetTitle');
+  const subtitle =
+    mode === 'login' ? t('login.subtitle') : mode === 'register' ? t('member.registerBody') : t('login.resetBody');
 
   return (
     <div
@@ -115,17 +175,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onClose, onSuccess }) =>
         role="dialog"
         aria-modal="true"
         aria-labelledby="login-modal-title"
-        className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-stone-200 p-6 space-y-5"
+        className="w-full max-w-sm max-h-[90dvh] overflow-y-auto bg-white rounded-2xl shadow-2xl border border-stone-200 p-6 space-y-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 id="login-modal-title" className="text-base font-bold text-stone-900">
-              {mode === 'login' ? t('login.title') : t('login.resetTitle')}
-            </h2>
-            <p className="text-xs text-stone-500 mt-1">
-              {mode === 'login' ? t('login.subtitle') : t('login.resetBody')}
-            </p>
+            <h2 id="login-modal-title" className="text-base font-bold text-stone-900">{title}</h2>
+            <p className="text-xs text-stone-500 mt-1">{subtitle}</p>
           </div>
           <button
             onClick={onClose}
@@ -143,7 +199,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onClose, onSuccess }) =>
           </p>
         )}
 
-        {mode === 'login' ? (
+        {mode === 'login' && (
           <>
             <button
               type="button"
@@ -164,27 +220,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onClose, onSuccess }) =>
             <form onSubmit={handleEmailLogin} className="space-y-3">
               <div>
                 <label htmlFor="login-email" className="block text-xs font-medium text-stone-700 mb-1">{t('login.email')}</label>
-                <input
-                  id="login-email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className={inputClass}
-                />
+                <input id="login-email" type="email" autoComplete="email" required value={email}
+                  onChange={(e) => setEmail(e.target.value)} className={MEMBER_INPUT_CLASS} />
               </div>
               <div>
                 <label htmlFor="login-password" className="block text-xs font-medium text-stone-700 mb-1">{t('login.password')}</label>
-                <input
-                  id="login-password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className={inputClass}
-                />
+                <input id="login-password" type="password" autoComplete="current-password" required value={password}
+                  onChange={(e) => setPassword(e.target.value)} className={MEMBER_INPUT_CLASS} />
               </div>
               <button
                 type="submit"
@@ -196,15 +238,84 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onClose, onSuccess }) =>
               </button>
             </form>
 
-            <button
-              type="button"
-              onClick={() => switchMode('reset')}
-              className="w-full text-center text-xs text-brand-700 hover:underline cursor-pointer"
-            >
-              {t('login.forgot')}
-            </button>
+            <div className="flex items-center justify-between text-xs">
+              <button type="button" onClick={() => switchMode('register')} className="text-brand-700 hover:underline cursor-pointer">
+                {t('member.registerLink')}
+              </button>
+              <button type="button" onClick={() => switchMode('reset')} className="text-stone-500 hover:underline cursor-pointer">
+                {t('login.forgot')}
+              </button>
+            </div>
           </>
-        ) : (
+        )}
+
+        {mode === 'register' && (
+          <>
+            {registerDone ? (
+              <div className="space-y-4">
+                <div className="flex items-start gap-2.5 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5">
+                  <MailCheck className="w-4 h-4 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold">{t('member.registerDoneTitle')}</p>
+                    <p className="mt-0.5">{t('member.registerDoneBody', { email: email.trim() })}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={finishRegister}
+                  className="w-full px-4 py-2.5 rounded-xl bg-stone-900 hover:bg-black text-white text-sm font-semibold cursor-pointer"
+                >
+                  {t('member.close')}
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleRegister} className="space-y-3">
+                <MemberProfileFields idPrefix="register" value={form} onChange={setForm} disabled={busy} />
+                <div>
+                  <label htmlFor="register-email" className="block text-xs font-medium text-stone-700 mb-1">{t('member.email')}</label>
+                  <input id="register-email" type="email" autoComplete="email" required value={email}
+                    onChange={(e) => setEmail(e.target.value)} disabled={busy || accountCreated} className={MEMBER_INPUT_CLASS} />
+                </div>
+                {!accountCreated && (
+                  <>
+                    <div>
+                      <label htmlFor="register-password" className="block text-xs font-medium text-stone-700 mb-1">{t('member.password')}</label>
+                      <input id="register-password" type="password" autoComplete="new-password" required minLength={PASSWORD_MIN}
+                        value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} className={MEMBER_INPUT_CLASS} />
+                      <p className="text-2xs text-stone-400 mt-1">{t('member.passwordHint')}</p>
+                    </div>
+                    <div>
+                      <label htmlFor="register-password2" className="block text-xs font-medium text-stone-700 mb-1">{t('member.confirmPassword')}</label>
+                      <input id="register-password2" type="password" autoComplete="new-password" required
+                        value={password2} onChange={(e) => setPassword2(e.target.value)} disabled={busy} className={MEMBER_INPUT_CLASS} />
+                    </div>
+                  </>
+                )}
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-stone-900 hover:bg-black text-white text-sm font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                  {t('member.registerSubmit')}
+                </button>
+              </form>
+            )}
+
+            {!accountCreated && (
+              <button
+                type="button"
+                onClick={() => switchMode('login')}
+                className="w-full inline-flex items-center justify-center gap-1 text-xs text-stone-600 hover:text-stone-900 cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                {t('member.backToLogin')}
+              </button>
+            )}
+          </>
+        )}
+
+        {mode === 'reset' && (
           <>
             {resetSent ? (
               <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
@@ -214,15 +325,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onClose, onSuccess }) =>
               <form onSubmit={handleReset} className="space-y-3">
                 <div>
                   <label htmlFor="reset-email" className="block text-xs font-medium text-stone-700 mb-1">{t('login.email')}</label>
-                  <input
-                    id="reset-email"
-                    type="email"
-                    autoComplete="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className={inputClass}
-                  />
+                  <input id="reset-email" type="email" autoComplete="email" required value={email}
+                    onChange={(e) => setEmail(e.target.value)} className={MEMBER_INPUT_CLASS} />
                 </div>
                 <button
                   type="submit"

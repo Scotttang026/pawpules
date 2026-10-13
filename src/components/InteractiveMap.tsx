@@ -7,9 +7,10 @@ import {
   statusLabel,
 } from '../utils/caseLabels';
 import L from 'leaflet';
-import { ChevronLeft, ChevronRight, ExternalLink, Sparkles, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, Sparkles, X, EyeOff } from 'lucide-react';
 import { AnimalIcon, animalIconSvg } from './AnimalIcons';
 import { careIconSvg } from './BrandIcons';
+import { isCoverSensitive } from '../utils/sensitivePhotos';
 
 interface InteractiveMapProps {
   reports: StrayReport[];
@@ -232,6 +233,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = 
     ? activeReport!.aiAnalysis!.apparentInjuries
     : [];
 
+  // 封面有問題（或者 AI 未檢查）就模糊資料卡縮圖
+  const activeCoverSensitive = activeReport ? isCoverSensitive(activeReport) : false;
+
   const animalBtn = (active: boolean) =>
     `inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
       active ? 'bg-brand-500 text-white' : 'text-stone-700 hover:bg-stone-100'
@@ -353,13 +357,16 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = 
                   }}
                   className="w-full flex items-center gap-3 px-1 py-2 text-left hover:bg-stone-50 rounded-lg transition-colors cursor-pointer"
                 >
-                  <img
-                    src={r.photoUrl}
-                    alt={t('map.photoAlt')}
-                    className="w-10 h-10 rounded-lg object-cover shrink-0 border border-stone-200 bg-stone-100"
-                    referrerPolicy="no-referrer"
-                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
-                  />
+                  {/* 外框負責圓角同 overflow-hidden，模糊放大咗嘅相唔會凸出框外 */}
+                  <div className="w-12 h-12 shrink-0 rounded-lg overflow-hidden bg-stone-100">
+                    <img
+                      src={r.photoUrl}
+                      alt={t('map.photoAlt')}
+                      className={`w-full h-full object-cover ${isCoverSensitive(r) ? 'blur-md scale-110' : ''}`}
+                      referrerPolicy="no-referrer"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                    />
+                  </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span
@@ -419,14 +426,28 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = 
           </div>
 
           <div className="flex gap-3 mb-3">
-            <img
-              src={activeReport.photoUrl}
-              alt={t('map.photoAlt')}
-              className="w-16 h-16 rounded-xl object-cover shrink-0 border border-stone-200"
-              referrerPolicy="no-referrer"
-              onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
-            />
-            <div className="text-xs text-stone-600 overflow-hidden">
+            {/* relative：EyeOff 標籤只蓋住張相，唔會鋪滿成張資料卡 */}
+            <div className="relative w-16 h-16 shrink-0 rounded-xl overflow-hidden border border-stone-200 bg-stone-100">
+              <img
+                src={activeReport.photoUrl}
+                alt={t('map.photoAlt')}
+                className={`w-full h-full object-cover ${activeCoverSensitive ? 'blur-md scale-110' : ''}`}
+                referrerPolicy="no-referrer"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+              />
+              {activeCoverSensitive && (
+                <div
+                  className="absolute inset-0 flex items-center justify-center pointer-events-none"
+                  title={t('sensitive.coverLabel')}
+                >
+                  <span className="p-1.5 rounded-full bg-stone-900/70 text-white">
+                    <EyeOff className="w-4 h-4" aria-hidden="true" />
+                    <span className="sr-only">{t('sensitive.coverLabel')}</span>
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="min-w-0 text-xs text-stone-600 overflow-hidden">
               <p className="font-semibold text-stone-900 truncate mb-1">📍 {activeReport.location.address}</p>
               <p className="line-clamp-2 text-stone-500 mb-1">{activeReport.description}</p>
               {safeActiveInjuries.length > 0 && (

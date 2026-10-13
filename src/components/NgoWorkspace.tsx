@@ -6,6 +6,7 @@ import type { StrayReport, CaseStatus, NGOOrganization } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { statusLabel, animalLabel } from '../utils/caseLabels';
 import { getApiLang } from '../i18n';
+import { isCoverSensitive } from '../utils/sensitivePhotos';
 
 type WorkTab = 'open' | 'mine' | 'others';
 
@@ -129,7 +130,7 @@ export const NgoWorkspace: React.FC<NgoWorkspaceProps> = ({
                   alt=""
                   referrerPolicy="no-referrer"
                   onError={(e) => (e.currentTarget.style.display = 'none')}
-                  className="w-20 h-20 rounded-xl object-cover shrink-0 bg-stone-100"
+                  className={`w-12 h-12 rounded-lg object-cover ${isCoverSensitive(r) ? 'blur-md scale-110' : ''}`}
                 />
               ) : (
                 <div className="w-20 h-20 rounded-xl bg-stone-100 shrink-0" />

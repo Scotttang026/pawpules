@@ -6,6 +6,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { subscribeToMyCaseIds } from '../services/caseService';
 import { statusLabel, urgencyLabel, animalLabel } from '../utils/caseLabels';
 import { getApiLang } from '../i18n';
+import EditCaseModal, { EditCaseAction } from './EditCaseModal';
+import DeleteRequestModal, { DeleteRequestAction } from './DeleteRequestModal';
+import ContactAdminModal, { ContactAdminAction } from './ContactAdminModal';
+import { isCoverSensitive } from '../utils/sensitivePhotos';
 
 interface MyCasesProps {
   reports: StrayReport[];
@@ -18,6 +22,7 @@ const STATUS_BADGE_CLASS: Record<CaseStatus, string> = {
   in_progress: 'bg-sky-100 text-sky-800',
   rescued: 'bg-emerald-100 text-emerald-800',
   closed: 'bg-stone-200 text-stone-700',
+  pending_deletion: 'bg-rose-100 text-rose-800',
 };
 
 const URGENCY_BADGE_CLASS: Record<string, string> = {
@@ -56,6 +61,9 @@ export default function MyCases({ reports, onSelectReport, onNewReport }: MyCase
 
   const [caseIds, setCaseIds] = useState<string[] | null>(null); // null = 載入中
   const [loadFailed, setLoadFailed] = useState(false);
+  const [editing, setEditing] = useState<StrayReport | null>(null);
+  const [deleting, setDeleting] = useState<StrayReport | null>(null);
+  const [contacting, setContacting] = useState<StrayReport | null>(null);
 
   useEffect(() => {
     setCaseIds(null);
@@ -72,7 +80,7 @@ export default function MyCases({ reports, onSelectReport, onNewReport }: MyCase
     return unsubscribe;
   }, [uid]);
 
-  // 用公開案件列表配對 ID；案件被刪咗就自動唔顯示
+  // 用公開案件列表配對 ID；案件被刪咗（或者待刪除）就自動唔顯示
   const myReports = useMemo(() => {
     if (!caseIds || caseIds.length === 0) return [];
     const idSet = new Set(caseIds);
@@ -80,6 +88,47 @@ export default function MyCases({ reports, onSelectReport, onNewReport }: MyCase
       .filter((r) => idSet.has(r.id))
       .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
   }, [reports, caseIds]);
+
+  // 視窗開住期間，用最新嘅案件資料（Firestore 即時更新）
+  const editingReport = editing ? myReports.find((r) => r.id === editing.id) ?? editing : null;
+  const deletingReport = deleting ? myReports.find((r) => r.id === deleting.id) ?? deleting : null;
+  const contactingReport = contacting ? myReports.find((r) => r.id === contacting.id) ?? contacting : null;
+
+  // 視窗放喺最外層，咁申請刪除後列表變空都唔會即刻收埋個視窗
+  const modals = (
+    <>
+      {editingReport && (
+        <EditCaseModal
+          report={editingReport}
+          onClose={() => setEditing(null)}
+          onSaved={(key) => {
+            setEditing(null);
+            alert(t(key));
+          }}
+        />
+      )}
+      {deletingReport && (
+        <DeleteRequestModal
+          report={deletingReport}
+          onClose={() => setDeleting(null)}
+          onDone={(key) => {
+            setDeleting(null);
+            alert(t(key));
+          }}
+        />
+      )}
+      {contactingReport && (
+        <ContactAdminModal
+          report={contactingReport}
+          onClose={() => setContacting(null)}
+          onDone={(key) => {
+            setContacting(null);
+            alert(t(key));
+          }}
+        />
+      )}
+    </>
+  );
 
   if (!uid) return null;
 
@@ -103,19 +152,22 @@ export default function MyCases({ reports, onSelectReport, onNewReport }: MyCase
 
   if (myReports.length === 0) {
     return (
-      <div className="flex flex-col items-center text-center gap-3 rounded-3xl border border-dashed border-stone-300 bg-white px-6 py-14">
-        <ClipboardList className="w-10 h-10 text-stone-300" />
-        <h3 className="text-base font-bold text-stone-800">{t('myCases.emptyTitle')}</h3>
-        <p className="max-w-sm text-sm text-stone-500">{t('myCases.emptyBody')}</p>
-        <button
-          type="button"
-          onClick={onNewReport}
-          className="mt-2 inline-flex items-center gap-1.5 rounded-xl bg-brand-500 px-4 py-2 text-sm font-bold text-stone-950 hover:bg-brand-600 transition-colors cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          {t('myCases.newReport')}
-        </button>
-      </div>
+      <>
+        <div className="flex flex-col items-center text-center gap-3 rounded-3xl border border-dashed border-stone-300 bg-white px-6 py-14">
+          <ClipboardList className="w-10 h-10 text-stone-300" />
+          <h3 className="text-base font-bold text-stone-800">{t('myCases.emptyTitle')}</h3>
+          <p className="max-w-sm text-sm text-stone-500">{t('myCases.emptyBody')}</p>
+          <button
+            type="button"
+            onClick={onNewReport}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-xl bg-brand-500 px-4 py-2 text-sm font-bold text-stone-950 hover:bg-brand-600 transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            {t('myCases.newReport')}
+          </button>
+        </div>
+        {modals}
+      </>
     );
   }
 
@@ -137,7 +189,7 @@ export default function MyCases({ reports, onSelectReport, onNewReport }: MyCase
         {myReports.map((report) => {
           const accepted = report.acceptedBy;
           return (
-            <li key={report.id} className="min-w-0">
+            <li key={report.id} className="min-w-0 space-y-1.5">
               <button
                 type="button"
                 onClick={() => onSelectReport(report)}
@@ -149,7 +201,7 @@ export default function MyCases({ reports, onSelectReport, onNewReport }: MyCase
                       src={report.photoUrl}
                       alt=""
                       referrerPolicy="no-referrer"
-                      className="h-full w-full object-cover"
+                      className={`w-12 h-12 rounded-lg object-cover ${isCoverSensitive(report) ? 'blur-md scale-110' : ''}`}
                       onError={(e) => {
                         (e.currentTarget as HTMLImageElement).style.display = 'none';
                       }}
@@ -199,10 +251,19 @@ export default function MyCases({ reports, onSelectReport, onNewReport }: MyCase
                   <ChevronRight className="w-4 h-4" />
                 </span>
               </button>
+
+              {/* 掣放喺卡片 <button> 外面（掣入面唔可以再放掣） */}
+              <div className="flex flex-wrap items-center justify-end gap-2 px-1">
+                <DeleteRequestAction report={report} onRequest={setDeleting} />
+                <EditCaseAction report={report} onEdit={setEditing} />
+                <ContactAdminAction report={report} onContact={setContacting} />
+              </div>
             </li>
           );
         })}
       </ul>
+
+      {modals}
     </div>
   );
 }

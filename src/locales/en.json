@@ -34,7 +34,8 @@
     "pending": "Pending",
     "in_progress": "In Progress",
     "rescued": "Rescued",
-    "closed": "Closed"
+    "closed": "Closed",
+    "pending_deletion": "Pending deletion"
   },
   "urgency": {
     "P0": "Critical",
@@ -476,5 +477,230 @@
   },
   "adminDashboard": {
     "viewDetails": "View case details"
+  },
+    "member": {
+    "lastName": "Last name",
+    "firstName": "First name",
+    "username": "Username",
+    "usernameHint": "2–30 characters: letters (any language), numbers and _ - . ! @ # $ % & * + = ? ~ ^ ( ) [ ]. No spaces. Shown on your comments and cannot be changed later.",
+    "email": "Email",
+    "password": "Password",
+    "passwordHint": "At least 8 characters",
+    "confirmPassword": "Confirm password",
+    "registerLink": "No account? Sign up",
+    "registerTitle": "Sign up",
+    "registerBody": "Members can comment and follow the cases they reported.",
+    "registerSubmit": "Sign up",
+    "registerDoneTitle": "You're signed up",
+    "registerDoneBody": "We sent a verification email to {{email}}. Open the link in it to start commenting.",
+    "backToLogin": "Back to sign in",
+    "close": "Close",
+    "setup": {
+      "title": "Set up your account",
+      "body": "Set a password and member details for {{email}}.",
+      "checking": "Checking link…",
+      "invalidTitle": "This link is invalid or has expired",
+      "invalidBody": "Go back to PawPulse and use \"Forgot password\" in the sign-in window to get a new link.",
+      "passwordSet": "Password set. Please finish your member details.",
+      "submit": "Finish setup",
+      "doneTitle": "All set",
+      "doneBody": "You're signed in and ready to use PawPulse.",
+      "goHome": "Go to PawPulse"
+    },
+    "account": {
+      "open": "Account settings",
+      "title": "Account settings",
+      "body": "Your name stays private; comments only show your username.",
+      "emailLabel": "Sign-in email",
+      "renameWarning": "You can change your username once every {{days}} days. Your past comments will show the new name, and your old name will be released for others to use right away.",
+      "renameConfirm": "Change your username from \"{{from}}\" to \"{{to}}\"?\n\nYou won't be able to change it again for {{days}} days, and your old name will be released for others to use.",
+      "cooldown": "You can change your username again on {{date}}",
+      "saved": "Saved",
+      "save": "Save",
+      "cancel": "Cancel"
+    },
+
+    "profileModal": {
+      "title": "Complete your profile",
+      "body": "Please add your name and a username before commenting. Your name stays private; comments only show your username.",
+      "submit": "Save",
+      "later": "Later"
+    },
+    "verify": {
+      "body": "Your email isn't verified yet. Verify it to start commenting.",
+      "resend": "Resend email",
+      "sent": "Sent. Please check your inbox (and spam).",
+      "refresh": "I've verified",
+      "stillUnverified": "Still not verified. Please open the link in the email first.",
+      "dismiss": "Dismiss"
+    },
+    "errors": {
+      "nameRequired": "Please enter your first and last name (up to 50 characters each)",
+      "usernameInvalid": "Invalid username (2–30 characters, at least one letter or number, no spaces or / < > \" ')",
+      "usernameTaken": "That username is taken. Please choose another.",
+      "usernameCooldown": "You can only change your username once every 30 days. Please try again later.",
+      "saveFailed": "Couldn't save your details. Please try again later.",
+      "emailInUse": "This email already has an account (it may have been created when you reported a case). Go back to sign in and use \"Forgot password\".",
+      "weakPassword": "Password must be at least 8 characters",
+      "passwordMismatch": "Passwords don't match",
+      "linkExpired": "This link is invalid or has expired. Please request a new one.",
+      "generic": "Something went wrong. Please try again later."
+    }
+  },
+    "editCase": {
+    "button": "Edit report",
+    "title": "Edit report",
+    "hint": "You can edit a report once within 24 hours. Existing photos are kept and you can add new ones (up to 5 in total). The AI will re-analyse after you save.",
+    "oldPhoto": "Original",
+    "newPhoto": "New",
+    "addPhoto": "Add",
+    "confirm": "Each report can only be edited once. You won't be able to edit it again after saving. Save now?",
+    "uploading": "Uploading new photos…",
+    "saving": "Saving — AI re-analysis takes about 10 seconds…",
+    "saved": "Changes saved and re-analysed by AI.",
+    "savedNoAi": "Changes saved, but AI couldn't re-analyse right now. Urgency is set to P1 for now.",
+    "cancel": "Cancel",
+    "save": "Save changes",
+    "states": {
+      "editable": "",
+      "accepted": "A rescue organisation has accepted this case, so it can no longer be edited",
+      "locked": "This case is being handled and can no longer be edited",
+      "used": "Edit already used (once per report)",
+      "expired": "More than 24 hours have passed, so it can no longer be edited"
+    },
+    "errors": {
+      "unauthenticated": "Please sign in first",
+      "not_owner": "Only the reporter can edit this case",
+      "not_found": "Case not found",
+      "case_accepted": "A rescue organisation has accepted this case, so it can no longer be edited",
+      "case_locked": "This case is being handled and can no longer be edited",
+      "edit_expired": "More than 24 hours have passed, so it can no longer be edited",
+      "edit_used": "This report has already been edited",
+      "bad_photos": "Photo data is invalid. Please choose the photos again",
+      "bad_input": "Some information is missing. Please check and try again",
+      "generic": "Couldn't save changes. Please try again later"
+    }
+  },
+  "deleteRequest": {
+    "button": "Request deletion",
+    "title": "Request case deletion",
+    "hint": "Reporters can't delete cases directly. After you submit, the case will be hidden (including from My cases) until an administrator reviews it. Administrators can also restore it.",
+    "reasonLabel": "Reason",
+    "reasonPlaceholder": "Choose a reason",
+    "reasons": {
+      "duplicate": "Duplicate report",
+      "resolved": "Animal already rescued / left the area",
+      "wrong_info": "Wrong information",
+      "privacy": "Photos or details contain private information",
+      "mistake": "Reported by mistake (no rescue needed)",
+      "other": "Other"
+    },
+    "noteOptional": "Details (optional)",
+    "noteRequired": "Please explain (required)",
+    "notePlaceholder": "e.g. I already reported this as PW-…",
+    "submit": "Submit request",
+    "cancel": "Cancel",
+    "sent": "Deletion request submitted. An administrator will review it soon.",
+    "errors": {
+      "noReason": "Please choose a reason",
+      "noNote": "Please add details when choosing \"Other\"",
+      "unauthenticated": "Please sign in first",
+      "not_owner": "Only the reporter can request deletion of this case",
+      "not_found": "Case not found",
+      "case_accepted": "A rescue organisation has accepted this case. Please use \"Contact admin\" instead",
+      "case_locked": "This case is being handled. Please use \"Contact admin\" instead",
+      "already_requested": "A deletion request has already been submitted for this case",
+      "bad_input": "Some information is missing. Please check and try again",
+      "generic": "Couldn't submit. Please try again later"
+    },
+    "admin": {
+      "title": "The reporter has requested deletion of this case",
+      "note": "Details",
+      "requestedAt": "Requested at",
+      "confirmDelete": "Confirm deletion",
+      "restore": "Restore case",
+      "deleteConfirm": "Permanently delete this case? The case, contact details and all photos will be removed. This can't be undone.",
+      "deleteFailed": "Couldn't delete. Please try again later",
+      "restoreFailed": "Couldn't restore. Please try again later",
+      "ngoNotice": "This case is awaiting an administrator's decision on a deletion request and can't be accepted for now."
+    }
+  },
+    "contactAdmin": {
+    "button": "Contact admin",
+    "title": "Contact admin",
+    "hint": "If you need to change or delete a report you can no longer edit yourself, or have any other question, let the administrator know here. They will reply to the email you signed in with.",
+    "categoryLabel": "Category",
+    "categoryPlaceholder": "Choose a category",
+    "categories": {
+      "update": "Update report details",
+      "delete": "Delete report",
+      "photo": "Photo issue (e.g. remove a photo)",
+      "status": "Ask about rescue progress",
+      "other": "Other"
+    },
+    "messageLabel": "Message (required)",
+    "placeholders": {
+      "update": "What should be changed? e.g. The animal is now in the park across the road",
+      "delete": "Why would you like the report deleted?",
+      "photo": "Which photo (e.g. the 2nd one) and what is the problem?",
+      "status": "What would you like to know?",
+      "other": "Tell us your question"
+    },
+    "submit": "Send",
+    "cancel": "Cancel",
+    "sent": "Sent to the administrator. They will reply by email.",
+    "errors": {
+      "noCategory": "Please choose a category",
+      "noMessage": "Please enter a message",
+      "unauthenticated": "Please sign in first",
+      "not_owner": "Only the reporter can contact the admin about this case",
+      "not_found": "Case not found",
+      "bad_input": "Some information is missing. Please check and try again",
+      "too_many": "Too many messages. Please try again in a few minutes",
+      "generic": "Couldn't send. Please try again later"
+    }
+  },
+    "sensitive": {
+    "coverLabel": "May be disturbing",
+    "title": "Photos may contain graphic or disturbing images",
+    "body": "AI flagged that some photos in this case may show blood or wounds. Show them anyway?",
+    "bodyUnchecked": "AI hasn't finished checking these photos. They may show blood or wounds. Show them anyway?",
+    "blurredHint": "Photos are blurred",
+    "show": "Show photos",
+    "notNow": "Not now"
+  },
+    "comments": {
+    "title": "Comments",
+    "count": "{{n}} comments",
+    "empty": "No comments yet.",
+    "loadFailed": "Couldn't load comments. Please try again later.",
+    "loginHint": "Log in as a member to comment.",
+    "placeholder": "Write a comment…",
+    "send": "Post",
+    "reply": "Reply",
+    "replyingTo": "Replying to {{name}}",
+    "cancelReply": "Cancel reply",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this comment? This can't be undone.",
+    "deleted": "This comment was deleted",
+    "adminName": "PawPulse Admin",
+    "unknownUser": "Member",
+    "badgeReporter": "Reporter",
+    "badgeNgo": "Rescue group",
+    "badgeAdmin": "Admin",
+    "errors": {
+      "login_required": "Please log in first.",
+      "email_unverified": "Please verify your email before commenting.",
+      "profile_required": "Please complete your member profile (first name, last name, username) before commenting.",
+      "empty": "Comment can't be empty.",
+      "too_long": "Comments can't be longer than {{max}} characters.",
+      "bad_parent": "The comment you're replying to no longer exists.",
+      "not_found": "Case or comment not found.",
+      "pending_deletion": "This case is awaiting an admin's decision on deletion. Comments are paused.",
+      "forbidden": "You can't delete this comment.",
+      "rate_limited": "You're commenting too fast. Please try again later.",
+      "unknown": "Something went wrong. Please try again later."
+    }
   }
+
 }
