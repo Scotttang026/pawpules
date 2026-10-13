@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { verifyPasswordResetCode, confirmPasswordReset, signInWithEmailAndPassword } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 import { Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MemberProfile } from '../types';
 import { MemberProfileFields } from './MemberProfileFields';
@@ -15,13 +16,27 @@ import {
   validateProfile,
   type MemberUiErrorKey,
 } from '../services/memberService';
+import PasswordInput from './PasswordInput';
 
-type Phase = 'checking' | 'form' | 'invalid' | 'done';
+// password：設密碼（新帳戶 + 忘記密碼共用）
+// profile：只有未有會員資料嘅新帳戶先會去到
+type Phase = 'checking' | 'password' | 'profile' | 'invalid' | 'done';
 
 // 用 replace：返主頁之後撳「上一頁」唔會返嚟呢版
 const goHome = () => window.location.replace('/');
 
-/** 設定密碼連結（/set-password?oobCode=...）：設密碼 + 填姓名同帳戶名 */
+// 已有會員資料 → 忘記密碼嘅舊用戶，唔使再填
+const hasProfile = async (uid: string): Promise<boolean> => {
+  try {
+    const snap = await getDoc(doc(db, 'userprofiles', uid));
+    return snap.exists();
+  } catch (err) {
+    console.warn('[SetPassword] profile check failed:', (err as { code?: string })?.code ?? err);
+    return false;
+  }
+};
+
+/** 設定 / 重設密碼連結（/set-password?oobCode=...） */
 export const SetPasswordPage: React.FC = () => {
   const { t } = useTranslation();
   const { reloadUser } = useAuth();
@@ -31,7 +46,7 @@ export const SetPasswordPage: React.FC = () => {
   const [form, setForm] = useState<MemberProfile>(EMPTY_PROFILE);
   const [password, setPassword] = useState('');
   const [password2, setPassword2] = useState('');
-  // 密碼已設好（條連結已用咗）：之後重試只會再存會員資料
+  // 條連結只可以用一次：密碼改咗之後重試只會再登入，唔會再 call confirmPasswordReset
   const [passwordDone, setPasswordDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [errorKey, setErrorKey] = useState<MemberUiErrorKey | null>(null);
@@ -47,7 +62,7 @@ export const SetPasswordPage: React.FC = () => {
       .then((e) => {
         if (cancelled) return;
         setEmail(e);
-        setPhase('form');
+        setPhase('password');
       })
       .catch((err) => {
         console.warn('[SetPassword] link check failed:', err?.code);
@@ -58,13 +73,9 @@ export const SetPasswordPage: React.FC = () => {
     };
   }, [oobCode]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // 第一步：設密碼 → 登入 → 睇下有冇會員資料
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const bad = validateProfile(form);
-    if (bad) {
-      setErrorKey(bad);
-      return;
-    }
     if (!passwordDone) {
       if (password.length < PASSWORD_MIN) {
         setErrorKey('member.errors.weakPassword');
@@ -82,18 +93,61 @@ export const SetPasswordPage: React.FC = () => {
       if (!passwordDone) {
         await confirmPasswordReset(auth, oobCode, password);
         setPasswordDone(true);
-        await signInWithEmailAndPassword(auth, email, password);
+        console.info('[SetPassword] password updated');
       }
-      await saveMemberProfile(form);
-      await reloadUser().catch(() => false); // 更新「已驗證」狀態
-      setPhase('done');
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      if (await hasProfile(cred.user.uid)) {
+        await reloadUser().catch(() => false);
+        setPhase('done');
+      } else {
+        setPhase('profile');
+      }
     } catch (err) {
-      console.warn('[SetPassword] failed:', (err as { code?: string })?.code ?? err);
+      console.warn('[SetPassword] password step failed:', (err as { code?: string })?.code ?? err);
       setErrorKey(memberErrorKeyOf(err));
     } finally {
       setBusy(false);
     }
   };
+
+  // 第二步（只限新帳戶）：填姓名同帳戶名
+  const handleProfileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const bad = validateProfile(form);
+    if (bad) {
+      setErrorKey(bad);
+      return;
+    }
+    setBusy(true);
+    setErrorKey(null);
+    try {
+      await saveMemberProfile(form);
+      await reloadUser().catch(() => false); // 更新「已驗證」狀態
+      setPhase('done');
+    } catch (err) {
+      console.warn('[SetPassword] profile step failed:', (err as { code?: string })?.code ?? err);
+      setErrorKey(memberErrorKeyOf(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const errorBox = errorKey && (
+    <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+      {t(errorKey)}
+    </p>
+  );
+
+  const submitButton = (
+    <button
+      type="submit"
+      disabled={busy}
+      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-stone-900 hover:bg-black text-white text-sm font-semibold transition-colors cursor-pointer disabled:opacity-50"
+    >
+      {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+      {t('member.setup.submit')}
+    </button>
+  );
 
   return (
     <div className="min-h-dvh bg-stone-100 flex items-center justify-center p-4">
@@ -137,18 +191,14 @@ export const SetPasswordPage: React.FC = () => {
           </div>
         )}
 
-        {phase === 'form' && (
-          <form onSubmit={handleSubmit} className="space-y-4">
+        {phase === 'password' && (
+          <form onSubmit={handlePasswordSubmit} className="space-y-4">
             <div>
               <h1 className="text-base font-bold text-stone-900">{t('member.setup.title')}</h1>
               <p className="text-xs text-stone-500 mt-1 break-all">{t('member.setup.body', { email })}</p>
             </div>
 
-            {errorKey && (
-              <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
-                {t(errorKey)}
-              </p>
-            )}
+            {errorBox}
 
             {passwordDone ? (
               <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
@@ -160,28 +210,33 @@ export const SetPasswordPage: React.FC = () => {
                 <input type="email" autoComplete="username" value={email} readOnly hidden />
                 <div>
                   <label htmlFor="setup-password" className="block text-xs font-medium text-stone-700 mb-1">{t('member.password')}</label>
-                  <input id="setup-password" type="password" autoComplete="new-password" required minLength={PASSWORD_MIN}
+                  <PasswordInput id="setup-password" autoComplete="new-password" required minLength={PASSWORD_MIN}
                     value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} className={MEMBER_INPUT_CLASS} />
                   <p className="text-2xs text-stone-400 mt-1">{t('member.passwordHint')}</p>
                 </div>
                 <div>
                   <label htmlFor="setup-password2" className="block text-xs font-medium text-stone-700 mb-1">{t('member.confirmPassword')}</label>
-                  <input id="setup-password2" type="password" autoComplete="new-password" required
+                  <PasswordInput id="setup-password2" autoComplete="new-password" required
                     value={password2} onChange={(e) => setPassword2(e.target.value)} disabled={busy} className={MEMBER_INPUT_CLASS} />
                 </div>
               </>
             )}
 
+            {submitButton}
+          </form>
+        )}
+
+        {phase === 'profile' && (
+          <form onSubmit={handleProfileSubmit} className="space-y-4">
+            <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+              {t('member.setup.passwordSet')}
+            </p>
+
+            {errorBox}
+
             <MemberProfileFields idPrefix="setup" value={form} onChange={setForm} disabled={busy} />
 
-            <button
-              type="submit"
-              disabled={busy}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-stone-900 hover:bg-black text-white text-sm font-semibold transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-              {t('member.setup.submit')}
-            </button>
+            {submitButton}
           </form>
         )}
       </div>

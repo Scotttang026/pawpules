@@ -94,6 +94,13 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
   const notYetUploaded = pending.filter((p) => !uploadedRef.current.has(p.id));
   const total = existing.length + pending.length;
   const canAdd = total < MAX_CASE_PHOTOS && notYetUploaded.length < freeSlots.length;
+  
+  console.log('[EditCase photos]', {
+  paths: existing.map((p) => p.path),
+  MAX_CASE_PHOTOS,
+  freeSlots,
+  canAdd,
+});
 
   const toggleTag = (tag: CaseTag) => {
     const next = tags.includes(tag) ? tags.filter((x) => x !== tag) : [...tags, tag];
@@ -290,19 +297,20 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
                 )}
               </li>
             ))}
-            {canAdd && (
-              <li>
-                <button
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
-                  disabled={busy}
-                  className="w-full aspect-square rounded-xl border-2 border-dashed border-stone-300 text-stone-500 flex flex-col items-center justify-center gap-1 hover:bg-stone-50 cursor-pointer disabled:opacity-60"
-                >
-                  <Plus className="w-5 h-5" />
-                  <span className="text-2xs">{t('editCase.addPhoto')}</span>
-                </button>
-              </li>
-            )}
+            <li>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={busy || !canAdd}
+                title={!canAdd ? t('reportForm.photo.limitReached', { max: MAX_CASE_PHOTOS }) : undefined}
+                className="w-full aspect-square rounded-xl border-2 border-dashed border-stone-300 text-stone-500 flex flex-col items-center justify-center gap-1 hover:bg-stone-50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Plus className="w-5 h-5" />
+                <span className="text-2xs text-center px-1">
+                  {canAdd ? t('editCase.addPhoto') : t('reportForm.photo.limitReached', { max: MAX_CASE_PHOTOS })}
+                </span>
+              </button>
+            </li>
           </ul>
         </div>
 

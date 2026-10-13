@@ -2,7 +2,7 @@ import {
   collection, doc, setDoc, updateDoc, onSnapshot, query,where,
   serverTimestamp, getDoc, writeBatch, DocumentData, orderBy, limit
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db, handleFirestoreError, OperationType, auth  } from '../firebase';
 import { 
   StrayReport, CaseStatus, NGOOrganization, AnimalType, UrgencyLevel, 
   NgoAccount, CaseAcceptance, LocationCoords, DeleteReason, 
@@ -154,8 +154,15 @@ export async function createCaseInFirestore(report: StrayReport): Promise<void> 
       reporterPhone: report.reporterPhone || '',
       reporterEmail: report.reporterEmail || '',
       createdByUid: report.createdByUid || 'anonymous',
+      // 登入帳戶 email（rules 會驗證同 token 一致，冇得冒認）
+      ...(auth.currentUser?.email && report.createdByUid === auth.currentUser.uid
+        ? { accountEmail: auth.currentUser.email }
+        : {}),
+
       createdAt: serverTimestamp(),
     };
+
+    
 
     batch.set(caseRef, casePayload);
     batch.set(contactRef, contactPayload);

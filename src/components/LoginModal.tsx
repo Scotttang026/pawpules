@@ -13,6 +13,7 @@ import {
   validateProfile,
   type MemberUiErrorKey,
 } from '../services/memberService';
+import PasswordInput from './PasswordInput';
 
 // 儲翻譯 key 而唔係文字，中途轉語言即刻跟住轉
 type LoginErrorKey =
@@ -225,7 +226,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onClose, onSuccess }) =>
               </div>
               <div>
                 <label htmlFor="login-password" className="block text-xs font-medium text-stone-700 mb-1">{t('login.password')}</label>
-                <input id="login-password" type="password" autoComplete="current-password" required value={password}
+                <PasswordInput id="login-password" autoComplete="current-password" required value={password}
                   onChange={(e) => setPassword(e.target.value)} className={MEMBER_INPUT_CLASS} />
               </div>
               <button
