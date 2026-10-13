@@ -6,11 +6,17 @@ import { NGOMatchFeedback } from './NGOMatchFeedback';
 import { getGoogleMapsDirectionsUrl } from '../utils/location';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchCaseContact, ReporterContactInfo, rankFirestoreNGOs } from '../services/caseService';
-import { statusLabel, CASE_STATUSES } from '../utils/caseLabels';
+import { statusLabel, animalLabel, CASE_STATUSES } from '../utils/caseLabels';
 import { getApiLang } from '../i18n';
-import { X, MapPin, Phone, User, Clock, Navigation, Mail, Copy, Check, ShieldCheck, Trash2, Lock } from 'lucide-react';
+import {
+  X, MapPin, Phone, User, Clock, Navigation, Mail, Copy, Check, ShieldCheck, Trash2, Lock,
+  Building2, Handshake, Loader2, ClipboardList,
+} from 'lucide-react';
+import { AnimalIcon } from './AnimalIcons';
 import { PhotoGallery } from './PhotoGallery';
+import { GeminiIcon, CareIcon } from './BrandIcons';
 import { getCasePhotos } from '../utils/casePhotos';
+import { NGO_STATUSES } from './NgoWorkspace';
 
 interface CaseDetailModalProps {
   report: StrayReport;
@@ -19,6 +25,7 @@ interface CaseDetailModalProps {
   onUpdateStatus?: (reportId: string, newStatus: CaseStatus) => void;
   onDispatchToNGO?: (ngoId: string, ngoName: string) => Promise<void>;
   onDeleteCase?: (reportId: string) => void;
+  onAcceptCase?: (reportId: string) => Promise<void>;
 }
 
 // 舊版寫入 Firestore 嘅佔位字（係資料，唔係介面文字），見到就當冇電話
@@ -39,17 +46,26 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
   onUpdateStatus,
   onDispatchToNGO,
   onDeleteCase,
+  onAcceptCase,
 }) => {
   const { t } = useTranslation();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isNgo, ngoId } = useAuth();
   const [activeTab, setActiveTab] = useState<'ai' | 'ngos'>('ai');
   const [copiedLink, setCopiedLink] = useState(false);
+  const [accepting, setAccepting] = useState(false);
 
   const [contactInfo, setContactInfo] = useState<ReporterContactInfo | null>(null);
   const [loadingContact, setLoadingContact] = useState(false);
 
+  // 自己機構接手咗嘅案件
+  const isMyCase = isNgo && !!ngoId && report.acceptedBy?.ngoId === ngoId;
+  // 聯絡資料：admin 或者接手機構先睇到（rules 亦會檢查）
+  const canSeeContact = isAdmin || isMyCase;
+  const canAccept =
+    isNgo && !report.acceptedBy && report.status !== 'rescued' && report.status !== 'closed' && !!onAcceptCase;
+
   useEffect(() => {
-    if (!isAdmin) {
+    if (!canSeeContact) {
       setContactInfo(null);
       return;
     }
@@ -65,7 +81,7 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isAdmin, report.id]);
+  }, [canSeeContact, report.id]);
 
   const enrichedReport: StrayReport = {
     ...report,
@@ -102,7 +118,18 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
       });
   };
 
-  const canManageStatus = isAdmin && typeof onUpdateStatus === 'function';
+  const handleAccept = async () => {
+    if (!onAcceptCase) return;
+    setAccepting(true);
+    try {
+      await onAcceptCase(report.id);
+    } finally {
+      setAccepting(false);
+    }
+  };
+
+  const canManageStatus = (isAdmin || isMyCase) && typeof onUpdateStatus === 'function';
+  const statusOptions: readonly CaseStatus[] = isAdmin ? CASE_STATUSES : NGO_STATUSES;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-xs overflow-y-auto" id="case-detail-modal">
@@ -164,17 +191,39 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
             </div>
 
             <div className="md:col-span-7 space-y-3">
-              <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200/80 space-y-2.5 text-xs text-stone-700">
+              {/* 通報人手動填寫嘅三項資料（動物種類、位置、現場狀況），同下面 AI 分析分開，避免混淆 */}
+              <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200/80 space-y-3 text-xs text-stone-700">
+                <div className="pb-2.5 border-b border-stone-200/60">
+                  <span className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
+                    <ClipboardList className="w-4 h-4 text-stone-500" />
+                    {t('caseModal.reporterInput.title')}
+                  </span>
+                  <p className="text-2xs text-stone-500 mt-0.5">{t('caseModal.reporterInput.hint')}</p>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <AnimalIcon type={report.animalType} active className="w-4 h-4 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-stone-900 block">{t('caseModal.reporterInput.animal')}</span>
+                    <span>{animalLabel(report.animalType, report.customAnimalName)}</span>
+                  </div>
+                </div>
+
                 <div className="flex items-start gap-2">
                   <MapPin className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-bold text-stone-900 block">{t('caseModal.location')}</span>
+                    <span className="font-bold text-stone-900 block">{t('caseModal.reporterInput.location')}</span>
                     <span>{report.location.address}</span>
                   </div>
                 </div>
 
+                <div>
+                  <span className="font-bold text-stone-900 block mb-1">{t('caseModal.reporterInput.description')}</span>
+                  <p className="text-stone-600 leading-relaxed bg-white p-2.5 rounded-xl border border-stone-200/60 whitespace-pre-line">{report.description}</p>
+                </div>
+
                 <div className="flex items-center gap-4 flex-wrap pt-2 border-t border-stone-200/60 text-2xs">
-                  {isAdmin ? (
+                  {canSeeContact ? (
                     <>
                       <div className="flex items-center gap-1.5 text-stone-600">
                         <User className="w-3.5 h-3.5 text-stone-400" />
@@ -214,29 +263,31 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                     <span>{formatDateTime(report.createdAt)}</span>
                   </div>
                 </div>
-
-                <div className="pt-2 border-t border-stone-200/60">
-                  <span className="font-bold text-stone-900 block mb-1">{t('caseModal.description')}</span>
-                  <p className="text-stone-600 leading-relaxed bg-white p-2.5 rounded-xl border border-stone-200/60">{report.description}</p>
-                </div>
               </div>
 
-              <div className="p-3.5 rounded-2xl bg-brand-50/60 border border-brand-200">
-                <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+              <div className="p-3.5 rounded-2xl bg-brand-50/60 border border-brand-200 space-y-2.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <span className="text-xs font-bold text-brand-900 flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-brand-600" />
                     {t('caseModal.statusTitle')}
                   </span>
                   {canManageStatus && (
                     <span className="text-2xs bg-brand-200 text-brand-900 px-2 py-0.5 rounded-full font-bold">
-                      {t('caseModal.adminCanChange')}
+                      {isAdmin ? t('caseModal.adminCanChange') : t('ngoWorkspace.canChange')}
                     </span>
                   )}
                 </div>
 
+                {report.acceptedBy && (
+                  <p className="text-2xs text-stone-700 flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-stone-500" />
+                    {t('ngoWorkspace.acceptedBy', { name: report.acceptedBy.ngoName })}
+                  </p>
+                )}
+
                 {canManageStatus ? (
                   <div className="flex flex-wrap gap-2">
-                    {CASE_STATUSES.map((status) => (
+                    {statusOptions.map((status) => (
                       <button
                         key={status}
                         type="button"
@@ -254,8 +305,21 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                 ) : (
                   <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-stone-300 text-xs font-bold text-stone-700 flex-wrap">
                     {statusLabel(report.status)}
-                    <span className="text-2xs text-stone-400 font-normal">{t('caseModal.adminOnly')}</span>
+                    <span className="text-2xs text-stone-400 font-normal">
+                      {isNgo ? t('ngoWorkspace.readOnly') : t('caseModal.adminOnly')}
+                    </span>
                   </div>
+                )}
+
+                {canAccept && (
+                  <button
+                    onClick={handleAccept}
+                    disabled={accepting}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-stone-950 text-xs font-bold transition-colors"
+                  >
+                    {accepting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Handshake className="w-4 h-4" />}
+                    {accepting ? t('ngoWorkspace.accepting') : t('ngoWorkspace.accept')}
+                  </button>
                 )}
               </div>
             </div>
@@ -268,7 +332,10 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                 activeTab === 'ai' ? 'border-brand-600 text-brand-600' : 'border-transparent text-stone-500 hover:text-stone-800'
               }`}
             >
-              {t('caseModal.tabAi')}
+              <span className="inline-flex items-center gap-1.5">
+                <GeminiIcon className="w-4 h-4 shrink-0" />
+                {t('caseModal.tabAi')}
+              </span>
             </button>
             <button
               onClick={() => setActiveTab('ngos')}
@@ -276,7 +343,10 @@ export const CaseDetailModal: React.FC<CaseDetailModalProps> = ({
                 activeTab === 'ngos' ? 'border-brand-600 text-brand-600' : 'border-transparent text-stone-500 hover:text-stone-800'
               }`}
             >
-              {t('caseModal.tabNgos', { n: liveMatchedNGOs.length })}
+              <span className="inline-flex items-center gap-1.5">
+                <CareIcon className="w-5 h-5 shrink-0" />
+                {t('caseModal.tabNgos', { n: liveMatchedNGOs.length })}
+              </span>
             </button>
           </div>
 

@@ -2,6 +2,7 @@ node_modules
 dist
 build
 coverage
+server-dist
 .git
 .gitignore
 .env
@@ -12,7 +13,11 @@ coverage
 .DS_Store
 .vscode
 .idea
+.firebase
 Dockerfile
 .dockerignore
-README.md
-server-dist
+*.md
+firebase-blueprint.json
+*firebase-adminsdk*.json
+service-account*.json
+serviceAccount*.json

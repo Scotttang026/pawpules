@@ -11,7 +11,18 @@
     "language": "Language",
     "adminActive": "Admin access active",
     "loginWithGoogle": "Sign in with Google",
-    "clickToLogout": "click to sign out"
+    "clickToLogout": "click to sign out",
+    "logoutConfirmTitle": "Sign out?",
+    "logoutConfirmBody": "Currently signed in as {{email}}",
+    "myCases": "My Cases",
+    "ngoWorkspace": "NGO Desk"
+  },
+  "caseTag": {
+    "stray": "Stray",
+    "injured": "Injured",
+    "trapped": "Trapped",
+    "juvenile": "Young",
+    "adult": "Adult"
   },
   "animal": {
     "cat": "Cat",
@@ -45,11 +56,11 @@
     },
     "photo": {
       "title": "Photo",
+      "hint": "Up to {{max}} photos from different angles. The first one is the cover shown in the case list and map.",
       "choose": "Choose photo",
       "change": "Change photo",
       "take": "Take photo",
       "previewAlt": "Photo preview",
-      "hint": "Up to {{max}} photos from different angles. The first one is the cover shown in the case list and map.",
       "add": "Add",
       "remove": "Remove this photo",
       "cover": "Cover",
@@ -70,6 +81,7 @@
     "description": {
       "title": "Situation",
       "hint": "Where the animal is, any injuries, how alert it seems",
+      "tagsLabel": "Tags (pick any, added to the first line of the situation)",
       "placeholder": "e.g. A cat is hiding in a planter and won’t put weight on its left leg; or a dog may have been hit by a car and is breathing fast…"
     },
     "contact": {
@@ -116,8 +128,8 @@
       "searchUnavailable": "Address search is unavailable right now. Please try again later, or tap “Use GPS”.",
       "preparing": "Preparing your report…",
       "uploading": "Uploading photo…",
-      "saving": "Saving your report and analysing injuries with AI…",
-      "uploadingN": "Uploading photos ({{done}}/{{total}})…"
+      "uploadingN": "Uploading photos ({{done}}/{{total}})…",
+      "saving": "Saving your report and analysing injuries with AI…"
     },
     "errors": {
       "noPhoto": "Please upload or take a photo of the animal first",
@@ -130,7 +142,8 @@
       "photoProcessFailed": "Couldn’t process this photo. Please try another one",
       "photoUrlTooLong": "The photo didn’t finish uploading. Please choose the photo again and retry.",
       "saveFailed": "Couldn’t save the report. Please try again later.",
-      "submitFailed": "Something went wrong while submitting. Please check your connection and try again."
+      "submitFailed": "Something went wrong while submitting. Please check your connection and try again.",
+      "badEmail": "Please enter a valid email, e.g. user@example.com"
     },
     "modal": {
       "title": "Privacy and AI Veterinary Disclaimer",
@@ -162,7 +175,7 @@
     "loading": "Loading...",
     "error": "An error occurred, please try again later"
   },
-    "addressSearch": {
+  "addressSearch": {
     "placeholder": "Enter an address, building or landmark, e.g. Langham Place, Mong Kok",
     "suggestError": "Address suggestions are unavailable right now. You can still type the address and tap “Locate”.",
     "resolveError": "Couldn't get coordinates for this address. Please pick it again or tap “Locate”.",
@@ -188,8 +201,11 @@
       "map": { "title": "Rescue map", "subtitle": "Live view of open cases (P0 critical / P1 medical / P2 stable) and NGO locations" },
       "cases": { "title": "Cases", "subtitle": "{{count}} cases · live sync" },
       "ngos": { "title": "Partners", "subtitle": "{{count}} rescue organisations and hotlines" },
-      "admin": { "title": "Admin", "subtitle": "Case dispatch, NGO capacity and system logs" }
+      "admin": { "title": "Admin", "subtitle": "Case dispatch, NGO capacity and system logs" },
+      "mycases": { "title": "My Cases", "subtitle": "Track the cases you reported" },
+      "ngo": { "title": "NGO Desk", "subtitle": "Accept and follow up rescue cases" }
     },
+    "comingSoon": "Coming soon",
     "urgentBadge": "{{count}} P0 critical",
     "newReport": "New report",
     "close": "Close",
@@ -211,7 +227,31 @@
     "footerName": "PawPulse · Real-time stray animal reporting & rescue matching",
     "footerPrivacy": "We handle reporter data in accordance with applicable personal data protection laws. For serious road accidents or animals in critical condition, {{hint}}."
   },
-    "location": {
+  "login": {
+    "title": "Sign in to PawPulse",
+    "subtitle": "Sign in to see content for your account.",
+    "google": "Continue with Google",
+    "or": "or",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Sign in",
+    "forgot": "Forgot password?",
+    "resetTitle": "Reset password",
+    "resetBody": "Enter the email you sign in with and we'll send you a reset link.",
+    "resetSubmit": "Send reset link",
+    "resetSent": "If this email is registered, a reset link has been sent. Please check your inbox (and spam folder).",
+    "back": "Back to sign in",
+    "close": "Close",
+    "errors": {
+      "invalid": "Incorrect email or password.",
+      "tooMany": "Too many attempts. Please try again later.",
+      "network": "Network error. Please check your connection and try again.",
+      "invalidEmail": "Please enter a valid email address.",
+      "popupBlocked": "The sign-in window was blocked. Please allow pop-ups and try again.",
+      "generic": "Sign-in failed. Please try again later."
+    }
+  },
+  "location": {
     "invalidCoords": "Invalid coordinates",
     "unknownDistrict": "District unconfirmed",
     "coordsFallback": "Coordinates ({{lat}}, {{lng}})"
@@ -222,6 +262,7 @@
     "allCount": "All ({{n}})",
     "urgencyFilter": "Urgency:",
     "statusFilter": "Status:",
+    "tagFilter": "Tags:",
     "emptyTitle": "No reports yet",
     "emptyBody": "All case data and photos sync in real time. New reports will appear here as soon as they're submitted.",
     "noMatchTitle": "No cases match your filters",
@@ -261,7 +302,7 @@
     "precautions": "Safety precautions: ",
     "listSeparator": "; "
   },
-    "caseModal": {
+  "caseModal": {
     "caseBadge": "{{level}} case",
     "copyLinkTitle": "Copy this case's tracking link",
     "linkCopied": "Link copied",
@@ -270,31 +311,35 @@
     "confirmDelete": "Admin confirmation: permanently delete case #{{id}}?",
     "deleteTitle": "Delete case (admin)",
     "close": "Close",
-    "location": "Reported location:",
+    "reporterInput": {
+      "title": "Submitted by reporter",
+      "hint": "Entered by the reporter and not verified",
+      "animal": "Animal",
+      "location": "Location",
+      "description": "On-site situation"
+    },
     "reporter": "Reporter: ",
     "loading": "Loading...",
     "defaultReporter": "Concerned citizen",
     "contactProtectedTitle": "Reporter contact details are protected and visible to admins only",
     "contactProtected": "Reporter contact details are protected (visible to the rescue coordination team only)",
-    "description": "Reporter's description:",
     "statusTitle": "Rescue status (live sync):",
     "adminCanChange": "Admins can change this",
     "adminOnly": "(only admins can change the status)",
-    "tabAi": "🧠 Google Gemini AI injury report",
-    "tabNgos": "🏥 Matched NGOs & feedback ({{n}})",
+    "tabAi": "Google Gemini AI injury report",
+    "tabNgos": "Matched NGOs & feedback ({{n}})",
     "aiNoResponseTitle": "No response from Gemini",
     "aiNoResponseBody": "AI injury analysis is unavailable. Please act according to the situation on site.",
     "navigate": "Open Google Maps directions",
     "closeView": "Close",
     "gallery": {
-    "prev": "Previous photo",
-    "next": "Next photo",
-    "counter": "{{n}} / {{total}}",
-    "photoAlt": "{{title}} – photo {{n}}",
-    "noPhoto": "No photo",
-    "goTo": "View photo {{n}}"
-  }
-
+      "prev": "Previous photo",
+      "next": "Next photo",
+      "counter": "{{n}} / {{total}}",
+      "photoAlt": "{{title}} – photo {{n}}",
+      "noPhoto": "No photo",
+      "goTo": "View photo {{n}}"
+    }
   },
   "ngoMatch": {
     "headerTitle": "Nearby NGOs matched automatically ({{n}} recommended)",
@@ -328,7 +373,7 @@
       "animalNames": { "cat": "Cat", "dog": "Dog", "bird": "Bird", "other": "Animal" }
     }
   },
-    "guide": {
+  "guide": {
     "title": "On-site first aid guide",
     "subtitle": "What to do first when you find a stray or injured animal",
     "close": "Close",
@@ -354,6 +399,7 @@
   },
   "map": {
     "allSpecies": "All species",
+    "tagFilter": "Tags",
     "allLevels": "All levels",
     "urgencyShort": { "P0": "P0 Critical", "P1": "P1 Medical", "P2": "P2 Stable" },
     "showNgos": "Show rescue organisations (NGOs)",
@@ -362,7 +408,9 @@
     "navigate": "Navigate in Google Maps",
     "photoAlt": "Case photo",
     "viewFull": "View full assessment & matches",
-    "close": "Close"
+    "close": "Close",
+    "casesHere": "{{n}} cases at this location",
+    "backToList": "Back to cases at this location"
   },
   "ngoDir": {
     "badge": "PawPulse partner NGO database (live sync)",
@@ -391,6 +439,42 @@
   "meta": {
     "title": "PawPulse - Real-time Stray Animal Reporting & AI Rescue Matching",
     "description": "Report stray animals in real time. AI helps assess injuries and matches nearby rescue organisations."
+  },
+  "ngoWorkspace": {
+    "orgLabel": "Organisation",
+    "orgMissing": "Your organisation record could not be found. Please contact an administrator.",
+    "tabOpen": "Open ({{n}})",
+    "tabMine": "Ours ({{n}})",
+    "tabOthers": "Taken by others ({{n}})",
+    "emptyOpen": "No open cases right now.",
+    "emptyMine": "Your organisation hasn't accepted any cases yet.",
+    "emptyOthers": "No cases have been accepted by other organisations.",
+    "accept": "Accept case",
+    "accepting": "Working…",
+    "acceptConfirm": "Accept case {{id}} for your organisation? The reporter will be notified by email.",
+    "acceptSuccess": "Case accepted.",
+    "acceptSuccessEmailed": "Case accepted and the reporter has been notified by email.",
+    "alreadyTaken": "This case has already been accepted by another organisation.",
+    "acceptFailed": "Could not accept the case. Please try again later.",
+    "acceptedBy": "Accepted by: {{name}}",
+    "updateStatus": "Update progress",
+    "viewDetails": "View details",
+    "readOnly": "Only the accepting organisation can update",
+    "canChange": "You can update"
+  },
+  "myCases": {
+    "loading": "Loading your cases…",
+    "loadFailed": "Unable to load your cases right now. Please try again later.",
+    "count": "{{n}} report(s)",
+    "emptyTitle": "No reports yet",
+    "emptyBody": "Cases reported with this email will appear here so you can follow their progress.",
+    "waiting": "Waiting for a rescue organisation",
+    "acceptedBy": "Handled by {{ngo}}",
+    "reportedAt": "Reported: {{time}}",
+    "viewDetails": "View details",
+    "newReport": "New report"
+  },
+  "adminDashboard": {
+    "viewDetails": "View case details"
   }
-
 }

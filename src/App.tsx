@@ -3,7 +3,8 @@ import { useTranslation, Trans } from 'react-i18next';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { StrayReport, CaseStatus, NGOOrganization } from './types';
-import { Sidebar, AppTab } from './components/Sidebar';
+import { Sidebar, AppTab, ROLE_NAV_ITEM, isRoleTab } from './components/Sidebar';
+import { LoginModal } from './components/LoginModal';
 import { ReportForm } from './components/ReportForm';
 import { AIAnalysisCard } from './components/AIAnalysisCard';
 import { NGOMatchFeedback } from './components/NGOMatchFeedback';
@@ -17,7 +18,9 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import {
   subscribeToCases,
   createCaseInFirestore,
-  updateCaseStatusInFirestore,
+  updateCaseStatus,
+  acceptCase,
+  ApiError,
   deleteCaseInFirestore,
   subscribeToNGOs,
   createNGOInFirestore,
@@ -39,10 +42,12 @@ import {
   Plus,
   X,
 } from 'lucide-react';
+import { NgoWorkspace } from './components/NgoWorkspace';
+import MyCases from './components/MyCases';
 
 function AppContent() {
   const { t } = useTranslation();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isNgo, role, loading } = useAuth();
   const emergency = getEmergencyContact();
   const [reports, setReports] = useState<StrayReport[]>([]);
   const [ngos, setNgos] = useState<NGOOrganization[]>([]);
@@ -50,10 +55,28 @@ function AppContent() {
   const [selectedReportForModal, setSelectedReportForModal] = useState<StrayReport | null>(null);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number } | undefined>(undefined);
   const [showGuideModal, setShowGuideModal] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  // 登入成功後等身份讀完，先跳去對應頁面（重新載入網頁唔會跳）
+  const [redirectAfterLogin, setRedirectAfterLogin] = useState(false);
   const [justSubmittedReport, setJustSubmittedReport] = useState<StrayReport | null>(null);
   const [emailConfirmationBanner, setEmailConfirmationBanner] = useState<{ caseId: string; email: string } | null>(null);
   // 只記「有冇失敗」，文字顯示時先翻譯，轉語言即刻跟住轉
   const [submitFailed, setSubmitFailed] = useState(false);
+
+  const homeTab: AppTab | null = role ? ROLE_NAV_ITEM[role].tab : null;
+
+  // 身份同分頁對唔上（登出、換帳戶、被降級）就返通報頁；登入後跳去自己身份嘅頁面
+  useEffect(() => {
+    if (loading) return;
+    if (redirectAfterLogin && homeTab) {
+      setRedirectAfterLogin(false);
+      setCurrentTab(homeTab);
+      return;
+    }
+    if (isRoleTab(currentTab) && currentTab !== homeTab) {
+      setCurrentTab('report');
+    }
+  }, [loading, homeTab, redirectAfterLogin, currentTab]);
 
   useEffect(() => {
     const unsubscribeCases = subscribeToCases(
@@ -114,6 +137,9 @@ function AppContent() {
   }, []);
 
   const urgentCount = reports.filter((r) => r.urgency === 'P0' && r.status !== 'rescued' && r.status !== 'closed').length;
+  const liveSelectedReport = selectedReportForModal
+    ? reports.find((r) => r.id === selectedReportForModal.id) ?? selectedReportForModal
+    : null;
 
   const handleCreateReport = async (newReport: StrayReport): Promise<boolean> => {
     setSubmitFailed(false);
@@ -190,7 +216,7 @@ function AppContent() {
     }
 
     try {
-      await updateCaseStatusInFirestore(reportId, newStatus);
+      await updateCaseStatus(reportId, newStatus);
     } catch (e) {
       console.error('Failed to update case status in Firestore:', e);
       setReports(previousReports);
@@ -218,17 +244,20 @@ function AppContent() {
     }
   };
 
-  const handleCreateNGO = async (newNGO: NGOOrganization) => {
+  const handleCreateNGO = async (newNGO: NGOOrganization): Promise<boolean> => {
     const previousNgos = ngos;
     setNgos((prev) => [...prev, newNGO]);
     try {
       await createNGOInFirestore(newNGO);
+      return true;
     } catch (e) {
       console.error('Failed to save NGO to Firestore:', e);
       setNgos(previousNgos);
       alert(t('app.ngoCreateFailed'));
+      return false;
     }
   };
+
 
   const handleDeleteNGO = async (ngoId: string) => {
     const previousNgos = ngos;
@@ -268,6 +297,21 @@ function AppContent() {
     setJustSubmittedReport((prev) => (prev ? patch(prev) : null));
   };
 
+  const handleAcceptCase = async (caseId: string) => {
+    if (!confirm(t('ngoWorkspace.acceptConfirm', { id: caseId }))) return;
+    try {
+      const { acceptedBy, emailSent } = await acceptCase(caseId, getBrowserLanguage());
+      const patch = (r: StrayReport): StrayReport =>
+        r.id === caseId ? { ...r, acceptedBy, status: 'in_progress' } : r;
+      setReports((prev) => prev.map(patch));
+      setSelectedReportForModal((prev) => (prev ? patch(prev) : null));
+      alert(t(emailSent ? 'ngoWorkspace.acceptSuccessEmailed' : 'ngoWorkspace.acceptSuccess'));
+    } catch (e) {
+      console.warn('Accept case failed:', e);
+      alert(t(e instanceof ApiError && e.status === 409 ? 'ngoWorkspace.alreadyTaken' : 'ngoWorkspace.acceptFailed'));
+    }
+  };
+
   const handleUpdateNGOCapacity = async (ngoId: string, capacity: 'available' | 'busy' | 'full') => {
     const previousNgos = ngos;
     setNgos((prev) => prev.map((n) => (n.id === ngoId ? { ...n, capacityStatus: capacity } : n)));
@@ -289,6 +333,8 @@ function AppContent() {
     map: { title: t('app.pageMeta.map.title'), subtitle: t('app.pageMeta.map.subtitle') },
     cases: { title: t('app.pageMeta.cases.title'), subtitle: t('app.pageMeta.cases.subtitle', { count: reports.length }) },
     ngos: { title: t('app.pageMeta.ngos.title'), subtitle: t('app.pageMeta.ngos.subtitle', { count: ngos.length }) },
+    mycases: { title: t('app.pageMeta.mycases.title'), subtitle: t('app.pageMeta.mycases.subtitle') },
+    ngo: { title: t('app.pageMeta.ngo.title'), subtitle: t('app.pageMeta.ngo.subtitle') },
     admin: { title: t('app.pageMeta.admin.title'), subtitle: t('app.pageMeta.admin.subtitle') },
   };
   const meta = pageMeta[currentTab];
@@ -299,6 +345,7 @@ function AppContent() {
         currentTab={currentTab}
         onSelectTab={(tab) => setCurrentTab(tab)}
         onOpenGuide={() => setShowGuideModal(true)}
+        onOpenLogin={() => setShowLoginModal(true)}
         urgentCount={urgentCount}
       />
 
@@ -354,14 +401,13 @@ function AppContent() {
                   </>
                 )}
 
-                {currentTab !== 'report' && currentTab !== 'admin' && (
+                {currentTab !== 'report' && currentTab !== 'admin' && currentTab !== 'mycases' && (
                   <button
                     onClick={() => setCurrentTab('report')}
-                    aria-label={t('app.newReport')}
-                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1 sm:gap-1.5 h-9 px-2.5 sm:px-3 rounded-lg bg-red-600 text-white text-xs font-semibold whitespace-nowrap hover:bg-red-700 transition-colors cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
-                    <span className="hidden sm:inline">{t('app.newReport')}</span>
+                    <span>{t('app.newReport')}</span>
                   </button>
                 )}
               </div>
@@ -474,10 +520,31 @@ function AppContent() {
               <NGODirectory ngos={ngos} onUpdateCapacity={handleUpdateNGOCapacity} />
             )}
 
-            {currentTab === 'admin' && (
+            {/* 4D：我的案件（只限普通 user） */}
+            {currentTab === 'mycases' && role === 'user' && (
+              <MyCases
+                reports={reports}
+                onSelectReport={(report) => setSelectedReportForModal(report)}
+                onNewReport={() => setCurrentTab('report')}
+              />
+            )}
+
+
+            {currentTab === 'ngo' && isNgo && (
+              <NgoWorkspace
+                reports={reports}
+                ngos={ngos}
+                onSelectReport={(report) => setSelectedReportForModal(report)}
+                onAcceptCase={handleAcceptCase}
+                onUpdateStatus={handleUpdateStatus}
+              />
+            )}
+
+            {currentTab === 'admin' && isAdmin && (
               <AdminDashboard
                 reports={reports}
                 ngos={ngos}
+                onSelectReport={(report) => setSelectedReportForModal(report)}
                 onUpdateCaseStatus={handleUpdateStatus}
                 onDeleteCase={handleDeleteCase}
                 onUpdateNGOCapacity={handleUpdateNGOCapacity}
@@ -494,18 +561,27 @@ function AppContent() {
         </div>
       </div>
 
-      {selectedReportForModal && (
+      {liveSelectedReport && (
         <CaseDetailModal
-          report={selectedReportForModal}
+          report={liveSelectedReport}
           ngos={ngos}
           onClose={() => setSelectedReportForModal(null)}
-          onUpdateStatus={isAdmin ? handleUpdateStatus : undefined}
+          onUpdateStatus={isAdmin || isNgo ? handleUpdateStatus : undefined}
           onDispatchToNGO={isAdmin ? handleDispatchToNGO : undefined}
           onDeleteCase={isAdmin ? handleDeleteCase : undefined}
+          onAcceptCase={isNgo ? handleAcceptCase : undefined}
         />
       )}
 
+
       {showGuideModal && <EmergencyGuideModal onClose={() => setShowGuideModal(false)} />}
+
+      {showLoginModal && (
+        <LoginModal
+          onClose={() => setShowLoginModal(false)}
+          onSuccess={() => setRedirectAfterLogin(true)}
+        />
+      )}
     </div>
   );
 }

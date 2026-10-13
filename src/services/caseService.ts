@@ -1,16 +1,18 @@
 import {
-  collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query,
+  collection, doc, setDoc, updateDoc, onSnapshot, query,
   serverTimestamp, getDoc, writeBatch, DocumentData,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { StrayReport, CaseStatus, NGOOrganization, AnimalType, UrgencyLevel } from '../types';
+import { StrayReport, CaseStatus, NGOOrganization, AnimalType, UrgencyLevel, NgoAccount, CaseAcceptance } from '../types';
 import { calculateDistanceKm } from '../utils/location';
 import { monitoring } from '../utils/monitoring';
+import { isCaseTag } from '../utils/caseLabels';
 import { apiFetch } from './api';
 
 export const CASE_COLLECTION = 'case';
 export const NGO_COLLECTION = 'ngodatail';
 export const ADMIN_COLLECTION = 'adminuser';
+export const NGO_USER_COLLECTION = 'ngouser';
 export const PRIVATE_SUBCOLLECTION = 'private';
 export const CONTACT_DOC_ID = 'contact';
 
@@ -23,8 +25,7 @@ export interface ReporterContactInfo {
 
 /**
  * 將 Firestore 文件轉換成 StrayReport（公眾版本）。
- * 永遠唔會回傳聯絡資料；冇有效座標嘅舊文件會回傳 null，唔會再塞香港預設座標。
- * 亦唔再讀 matchedNGOs：NGO 推薦一律由 ngodatail 即時計算。
+ * 永遠唔會回傳聯絡資料；冇有效座標嘅文件會回傳 null。
  */
 export function docToReport(id: string, data: DocumentData): StrayReport | null {
   const loc = data.location;
@@ -36,13 +37,14 @@ export function docToReport(id: string, data: DocumentData): StrayReport | null 
     title: data.title || `#${id.slice(0, 6)}`,
     animalType: data.animalType || 'other',
     customAnimalName: data.customAnimalName || undefined,
+    tags: Array.isArray(data.tags) ? data.tags.filter(isCaseTag) : [],
     photoUrl: data.photoUrl || '',
     storagePath: data.storagePath || '',
-      photos: Array.isArray(data.photos)
-    ? data.photos
-        .filter((p: any) => p && typeof p.url === 'string' && typeof p.path === 'string')
-        .map((p: any) => ({ url: p.url, path: p.path }))
-    : undefined,
+    photos: Array.isArray(data.photos)
+      ? data.photos
+          .filter((p: any) => p && typeof p.url === 'string' && typeof p.path === 'string')
+          .map((p: any) => ({ url: p.url, path: p.path }))
+      : [],
     location: { lat: loc.lat, lng: loc.lng, address: loc.address || '', district: loc.district },
     description: data.description || '',
     reporterName: '',
@@ -57,6 +59,15 @@ export function docToReport(id: string, data: DocumentData): StrayReport | null 
     geminiResponse: ai,
     aiAnalysis: ai,
     dispatchedToNGO: data.dispatchedToNGO || undefined,
+    acceptedBy:
+      data.acceptedBy && typeof data.acceptedBy.ngoId === 'string'
+        ? {
+            ngoId: data.acceptedBy.ngoId,
+            ngoName: String(data.acceptedBy.ngoName ?? ''),
+            acceptedByUid: String(data.acceptedBy.acceptedByUid ?? ''),
+            acceptedAt: String(data.acceptedBy.acceptedAt ?? ''),
+          }
+        : undefined,
   };
 }
 
@@ -84,14 +95,11 @@ export function subscribeToCases(
   );
 }
 
-
 /**
- * Save a new report using an atomic batch write:
- *   1. /case/{caseId}                 -> 公開欄位（動物相片、GPS、傷勢描述等）
- *   2. /case/{caseId}/private/contact -> 報案人聯絡資料，只有 admin 可讀
- *
- * ⚠️ 用 writeBatch 確保兩份文件一齊成功或一齊失敗，唔會出現「案件已建立
- * 但聯絡資料遺失」嘅不一致狀態。
+ * 用 batch 一齊寫：
+ *   1. /case/{caseId}                 -> 公開欄位
+ *   2. /case/{caseId}/private/contact -> 報案人聯絡資料
+ * 兩份一齊成功或一齊失敗。
  */
 export async function createCaseInFirestore(report: StrayReport): Promise<void> {
   const caseRef = doc(db, CASE_COLLECTION, report.id);
@@ -105,10 +113,11 @@ export async function createCaseInFirestore(report: StrayReport): Promise<void> 
       title: report.title,
       animalType: report.animalType,
       customAnimalName: report.customAnimalName || '',
+      // 冇揀標籤就唔寫呢個欄位（舊案件亦冇）
+      ...(report.tags?.length ? { tags: report.tags } : {}),
       photoUrl: report.photoUrl,
       storagePath: report.storagePath || '',
-          // Firestore 唔接受 undefined，冇相就成個欄位唔寫
-    ...(report.photos?.length ? { photos: report.photos.map(({ url, path }) => ({ url, path })) } : {}),
+      photos: report.photos.map(({ url, path }) => ({ url, path })),
       location: report.location,
       description: report.description,
       createdAt: serverTimestamp(),
@@ -120,8 +129,7 @@ export async function createCaseInFirestore(report: StrayReport): Promise<void> 
       dispatchedToNGO: report.dispatchedToNGO || null,
     };
 
-    // ⚠️ reporterName / reporterPhone 補返 `|| ''` fallback，避免 undefined
-    // 傳入 Firestore 令整個 batch（包括公開案件文件）一齊寫入失敗。
+    // 全部 `|| ''`：Firestore 唔接受 undefined，會令成個 batch 失敗
     const contactPayload: ReporterContactInfo & { createdAt: unknown } = {
       reporterName: report.reporterName || '',
       reporterPhone: report.reporterPhone || '',
@@ -143,12 +151,7 @@ export async function createCaseInFirestore(report: StrayReport): Promise<void> 
   }
 }
 
-/**
- * Admin-only fetch of a case's private contact information.
- *
- * ⚠️ Fail-closed：任何讀取失敗（包括非 admin 被 Rules 拒絕）都回傳 null
- * 而唔係拋出例外，確保呼叫方可以安全預設「未能載入聯絡資料」。
- */
+/** 讀報案人聯絡資料；任何失敗都回 null（fail-closed） */
 export async function fetchCaseContact(caseId: string): Promise<ReporterContactInfo | null> {
   try {
     const contactRef = doc(db, CASE_COLLECTION, caseId, PRIVATE_SUBCOLLECTION, CONTACT_DOC_ID);
@@ -166,28 +169,6 @@ export async function fetchCaseContact(caseId: string): Promise<ReporterContactI
     console.warn(`fetchCaseContact: 無法讀取案件 #${caseId} 嘅聯絡資料（可能冇權限或文件不存在）。`, err);
     monitoring.captureError(err, { caseId, context: 'fetchCaseContact' });
     return null;
-  }
-}
-
-export async function updateCaseStatusInFirestore(
-  caseId: string,
-  newStatus: CaseStatus,
-  dispatchedToNGO?: StrayReport['dispatchedToNGO']
-): Promise<void> {
-  try {
-    const caseRef = doc(db, CASE_COLLECTION, caseId);
-    const updatePayload: Record<string, unknown> = {
-      status: newStatus,
-      updatedAt: serverTimestamp(),
-    };
-    if (dispatchedToNGO !== undefined) {
-      updatePayload.dispatchedToNGO = dispatchedToNGO;
-    }
-    await updateDoc(caseRef, updatePayload);
-    monitoring.log('info', 'firestore', `Updated case #${caseId} status to ${newStatus}`);
-  } catch (err) {
-    monitoring.captureError(err, { caseId, newStatus });
-    handleFirestoreError(err, OperationType.UPDATE, `${CASE_COLLECTION}/${caseId}`);
   }
 }
 
@@ -211,10 +192,6 @@ export function subscribeToNGOs(
   return onSnapshot(
     q,
     (snapshot) => {
-      if (snapshot.empty) {
-        onUpdate([]);
-        return;
-      }
       const list: NGOOrganization[] = [];
       snapshot.forEach((snap) => {
         list.push({ id: snap.id, ...(snap.data() as any) });
@@ -232,12 +209,17 @@ export function subscribeToNGOs(
 export async function createNGOInFirestore(ngo: NGOOrganization): Promise<void> {
   try {
     const ngoRef = doc(db, NGO_COLLECTION, ngo.id);
-    const payload = {
-      ...ngo,
-      capacityStatus: ngo.capacityStatus || 'available',
-      updatedAt: serverTimestamp(),
-      createdAt: serverTimestamp(),
-    };
+    // 配對時計出嚟嘅數值唔儲；undefined 欄位要刪走，否則 Firestore 會拒絕成份文件
+    const payload: Record<string, unknown> = { ...ngo, capacityStatus: ngo.capacityStatus || 'available' };
+    delete payload.distanceKm;
+    delete payload.driveTimeMins;
+    delete payload.matchScore;
+    for (const key of Object.keys(payload)) {
+      if (payload[key] === undefined) delete payload[key];
+    }
+    payload.updatedAt = serverTimestamp();
+    payload.createdAt = serverTimestamp();
+
     await setDoc(ngoRef, payload);
     monitoring.log('info', 'firestore', `Added NGO ${ngo.name} (${ngo.id}) to ngodatail table`);
   } catch (err) {
@@ -246,14 +228,15 @@ export async function createNGOInFirestore(ngo: NGOOrganization): Promise<void> 
   }
 }
 
+/** 交由 server 刪除機構，連埋佢所有登入帳戶（只限 admin） */
 export async function deleteNGOInFirestore(ngoId: string): Promise<void> {
   try {
-    const ngoRef = doc(db, NGO_COLLECTION, ngoId);
-    await deleteDoc(ngoRef);
-    monitoring.log('warn', 'firestore', `Deleted NGO #${ngoId} from ngodatail table`);
+    const res = await apiFetch(`/api/admin/ngos/${encodeURIComponent(ngoId)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`Delete NGO failed: HTTP ${res.status}`);
+    monitoring.log('warn', 'firestore', `Deleted NGO #${ngoId} with its login accounts`);
   } catch (err) {
     monitoring.captureError(err, { ngoId });
-    handleFirestoreError(err, OperationType.DELETE, `${NGO_COLLECTION}/${ngoId}`);
+    throw err;
   }
 }
 
@@ -272,6 +255,118 @@ export async function updateNGOCapacity(
     monitoring.captureError(err, { ngoId, capacityStatus });
     handleFirestoreError(err, OperationType.UPDATE, `${NGO_COLLECTION}/${ngoId}`);
   }
+}
+
+// ---------- 機構登入帳戶（只限 admin） ----------
+
+/** 即時讀取所有機構登入帳戶（rules 只俾 admin 讀晒） */
+export function subscribeToNgoAccounts(
+  onUpdate: (accounts: NgoAccount[]) => void,
+  onError?: (err: Error) => void
+) {
+  return onSnapshot(
+    collection(db, NGO_USER_COLLECTION),
+    (snapshot) => {
+      const list: NgoAccount[] = [];
+      snapshot.forEach((d) => {
+        const data = d.data();
+        if (typeof data.ngoId === 'string') {
+          list.push({ uid: d.id, email: typeof data.email === 'string' ? data.email : '', ngoId: data.ngoId });
+        }
+      });
+      list.sort((a, b) => a.email.localeCompare(b.email));
+      onUpdate(list);
+    },
+    (error) => {
+      monitoring.captureError(error, { context: 'subscribeToNgoAccounts' });
+      if (onError) onError(error);
+      onUpdate([]);
+    }
+  );
+}
+
+/** 建立（或重寄）機構登入帳戶；失敗會 throw server 嘅錯誤訊息 */
+export async function createNgoAccount(
+  ngoId: string,
+  email: string,
+  lang: string
+): Promise<{ emailed: boolean; link?: string }> {
+  const res = await apiFetch('/api/admin/ngo-accounts', {
+    method: 'POST',
+    body: JSON.stringify({ ngoId, email, lang }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  monitoring.log('info', 'auth', `NGO account ${email} linked to ${ngoId}`);
+    return { emailed: data.simulated === false };
+}
+
+/** 移除機構登入帳戶（帳戶本身保留，變返普通 user，並即刻登出） */
+export async function deleteNgoAccount(uid: string): Promise<void> {
+  const res = await apiFetch(`/api/admin/ngo-accounts/${encodeURIComponent(uid)}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.error || `HTTP ${res.status}`);
+  }
+  monitoring.log('warn', 'auth', `NGO account ${uid} removed`);
+}
+
+// ---------- 接手案件／更新進度（經 server，admin 同 NGO 共用） ----------
+
+/** 帶 HTTP 狀態碼嘅錯誤，例如 409 = 已被其他機構接手 */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** 更新案件進度：admin 任何案件；NGO 只可以改自己機構接手咗嘅 */
+export async function updateCaseStatus(caseId: string, status: CaseStatus): Promise<void> {
+  const res = await apiFetch(`/api/cases/${encodeURIComponent(caseId)}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(data?.error || `HTTP ${res.status}`, res.status);
+  }
+  monitoring.log('info', 'firestore', `Updated case #${caseId} status to ${status}`);
+}
+
+/** NGO 接手案件；server 用 transaction 防搶，並寄信通知報案人 */
+export async function acceptCase(
+  caseId: string,
+  lang: string
+): Promise<{ acceptedBy: CaseAcceptance; emailSent: boolean }> {
+  const res = await apiFetch(`/api/cases/${encodeURIComponent(caseId)}/accept`, {
+    method: 'POST',
+    body: JSON.stringify({ lang }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data?.error || `HTTP ${res.status}`, res.status);
+  monitoring.log('info', 'firestore', `Case #${caseId} accepted by ${data.acceptedBy?.ngoId}`);
+  return { acceptedBy: data.acceptedBy, emailSent: !!data.emailSent };
+}
+
+// 訂閱「我的案件」ID 清單：usercases/{uid} 只有本人可讀，由 server 寫入
+export function subscribeToMyCaseIds(
+  uid: string,
+  onChange: (ids: string[]) => void,
+  onError?: (err: Error) => void,
+): () => void {
+  return onSnapshot(
+    doc(db, 'usercases', uid),
+    (snap) => {
+      const raw = snap.exists() ? snap.data().caseIds : null;
+      onChange(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : []);
+    },
+    (err) => {
+      console.warn('[MyCases] subscribe failed:', err);
+      onError?.(err);
+    },
+  );
 }
 
 export function rankFirestoreNGOs(

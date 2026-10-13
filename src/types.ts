@@ -1,6 +1,8 @@
 // ⚠️ 已加入 'bird'，同 firestore.rules 及 entities schema 對齊。
 // 如果產品範圍確實不打算處理雀鳥案件，請反過來喺 Rules／schema 移除 bird。
 export type AnimalType = 'cat' | 'dog' | 'bird' | 'other';
+// 報案人喺「現場狀況」揀嘅標籤（可以揀多個），用嚟喺地圖同個案頁篩選
+export type CaseTag = 'stray' | 'injured' | 'trapped' | 'juvenile' | 'adult';
 
 export type UrgencyLevel = 'P0' | 'P1' | 'P2'; // P0: 極度緊急(重傷/瀕危), P1: 需醫療關注(骨折/明顯傷病), P2: 穩定(走失/幼崽/普通救助)
 
@@ -39,6 +41,8 @@ export interface NGOOrganization {
   englishName: string;
   hotline: string;
   whatsapp?: string;
+  publicEmail?: string;  // 公開電郵（報案人睇到），唔係登入用
+  website?: string;      // 只接受 http(s):// 開頭
   address: string;
   district: string;
   lat: number;
@@ -53,9 +57,24 @@ export interface NGOOrganization {
   matchScore?: number;
 }
 
+// 機構登入帳戶（ngouser/{uid}），只有 admin 同本人讀到
+export interface NgoAccount {
+  uid: string;
+  email: string;
+  ngoId: string;
+}
+
 export interface CasePhoto {
   url: string;   // Storage 下載網址
   path: string;  // animal-reports/{caseId}/{index}.jpg
+}
+
+/** NGO 接手紀錄（公開資料，唔放職員電郵） */
+export interface CaseAcceptance {
+  ngoId: string;
+  ngoName: string;
+  acceptedByUid: string;
+  acceptedAt: string;
 }
 
 export interface StrayReport {
@@ -63,9 +82,11 @@ export interface StrayReport {
   title: string;
   animalType: AnimalType;
   customAnimalName?: string;
+  tags?: CaseTag[];
   photoUrl: string; // Cloud Storage public URL or served URL
   storagePath?: string; // Cloud Storage object path linked to this case
-  photos?: CasePhoto[];  // 全部相（第 1 張 = photoUrl 封面）；舊案件冇呢個欄位
+  photos: CasePhoto[];   // 全部相（第 1 張 = photoUrl 封面）
+  acceptedBy?: CaseAcceptance;
   location: LocationCoords;
   description: string;
   reporterName: string;
@@ -89,20 +110,15 @@ export interface StrayReport {
   };
 }
 
-export interface AdminUser {
-  uid: string;
-  email: string;
-  name?: string;
-  role: 'admin' | 'superadmin';
-  createdAt?: string;
-  updatedAt?: string;
-}
+// 登入後嘅身份；未登入就係 null（唔係呢度其中一個值）
+export type UserRole = 'user' | 'ngo' | 'admin';
 
 export interface UserProfile {
   uid: string;
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
-  role: 'admin' | 'user';
+  role: UserRole;
+  ngoId: string | null; // 只有 ngo 先有，對應 ngodatail/{ngoId}
   isAdmin: boolean;
 }

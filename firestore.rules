@@ -3,19 +3,55 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // admin：有 adminuser/{uid} 文件（喺 Console 手動加）
     function isAdmin() {
-      return request.auth != null &&
-        exists(/databases/$(database)/documents/adminuser/$(request.auth.uid));
+      return signedIn()
+        && exists(/databases/$(database)/documents/adminuser/$(request.auth.uid));
+    }
+
+    // ngo：有 ngouser/{uid} 文件（只可以由 server 建立）
+    function isNgo() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/ngouser/$(request.auth.uid));
+    }
+    
+    match /usercases/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;  // 只可以睇自己份
+      allow write: if false;                                 // 只可以經 server 寫
+    }
+
+
+    // 登入者所屬機構 ID（一定要先確認 isNgo() 先好 call）
+    function myNgoId() {
+      return get(/databases/$(database)/documents/ngouser/$(request.auth.uid)).data.get('ngoId', '');
+    }
+
+    // 呢宗案件係咪由登入者嘅機構接手（acceptedBy 冇或者唔啱 → false）
+    function isAcceptingNgo(caseId) {
+      return isNgo()
+        && get(/databases/$(database)/documents/case/$(caseId)).data
+             .get('acceptedBy', {}).get('ngoId', '') == myNgoId()
+        && myNgoId() != '';
+    }
+
+    match /adminuser/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;  // 只可以睇自己份
+      allow write: if false;                                 // 只可以喺 Console 改
+    }
+
+    match /ngouser/{uid} {
+      // 本人睇自己份（前端判斷身份用）；admin 睇晒（後台列帳戶用）
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if false;                                 // 只可以經 server（Admin SDK）改
     }
 
     // 可選字串欄位：唔存在 OK；存在就必須係字串兼唔超過上限
     function optStr(data, key, max) {
       return !(key in data) || (data[key] is string && data[key].size() <= max);
-    }
-
-    // 可選 map 欄位：唔存在、null 或 map 都 OK
-    function optMapOrNull(data, key) {
-      return !(key in data) || data[key] == null || data[key] is map;
     }
 
     function isValidLocation(loc) {
@@ -28,12 +64,38 @@ service cloud.firestore {
         && optStr(loc, 'district', 100);
     }
 
+    // 一張相：path 同 url 都必須喺 animal-reports/{caseId}/ 入面，唔可以借用其他案件嘅相
+    function isValidPhoto(caseId, p) {
+      return p is map
+        && p.keys().hasAll(['url', 'path'])
+        && p.keys().hasOnly(['url', 'path'])
+        && p.url is string && p.url.size() > 0 && p.url.size() <= 2048
+        && p.url.matches('^https://firebasestorage[.]googleapis[.]com/v0/b/[^/]+/o/animal-reports%2F' + caseId + '%2F[0-4][.]jpg[?].*$')
+        && p.path is string
+        && p.path.matches('^animal-reports/' + caseId + '/[0-4][.]jpg$');
+    }
+
+    // rules 冇 loop，所以逐個位寫明；size() 檢查放前面，&& / || 會短路，唔會讀超出範圍
+    function isValidPhotos(caseId, data) {
+      return data.photos is list
+        && data.photos.size() >= 1 && data.photos.size() <= 5
+        && isValidPhoto(caseId, data.photos[0])
+        && (data.photos.size() < 2 || isValidPhoto(caseId, data.photos[1]))
+        && (data.photos.size() < 3 || isValidPhoto(caseId, data.photos[2]))
+        && (data.photos.size() < 4 || isValidPhoto(caseId, data.photos[3]))
+        && (data.photos.size() < 5 || isValidPhoto(caseId, data.photos[4]))
+        // 封面必須係第 1 張
+        && data.photoUrl == data.photos[0].url
+        && data.storagePath == data.photos[0].path;
+    }
+
     // 公開案件文件：hasOnly 白名單，擋走任何多餘欄位（Dirty Dozen #1、#12）
+    // ⚠️ 冇 acceptedBy：報案時唔可以自己填「已接手」，只可以由 server 寫
     function isValidCase(caseId, data) {
       return data.keys().hasAll(['id', 'title', 'animalType', 'photoUrl', 'location',
-                                 'description', 'status', 'urgency', 'createdAt'])
-        && data.keys().hasOnly(['id', 'title', 'animalType', 'customAnimalName', 'photoUrl',
-                                'storagePath', 'location', 'description', 'createdAt', 'updatedAt',
+                                 'description', 'status', 'urgency', 'createdAt', 'storagePath', 'photos'])
+        && data.keys().hasOnly(['id', 'title', 'animalType', 'customAnimalName', 'tags', 'photoUrl',
+                                'storagePath', 'photos', 'location', 'description', 'createdAt', 'updatedAt',
                                 'status', 'urgency', 'geminiResponse', 'aiAnalysis',
                                 'matchedNGOs', 'dispatchedToNGO'])
         && caseId.matches('^[A-Za-z0-9_-]{1,64}$')
@@ -41,8 +103,11 @@ service cloud.firestore {
         && data.title is string && data.title.size() > 0 && data.title.size() <= 200
         && data.animalType in ['cat', 'dog', 'bird', 'other']
         && optStr(data, 'customAnimalName', 100)
+        && (!('tags' in data) || (data.tags is list && data.tags.size() <= 5
+            && data.tags.hasOnly(['stray', 'injured', 'trapped', 'juvenile', 'adult'])))
         && data.photoUrl is string && data.photoUrl.size() > 0 && data.photoUrl.size() <= 2048
         && optStr(data, 'storagePath', 256)
+        && isValidPhotos(caseId, data)
         && isValidLocation(data.location)
         && data.description is string && data.description.size() > 0 && data.description.size() <= 2000
         && data.status == 'pending'
@@ -73,10 +138,12 @@ service cloud.firestore {
       // 必須同 private/contact 喺同一個 batch 一齊建立
       allow create: if isValidCase(caseId, request.resource.data)
         && existsAfter(/databases/$(database)/documents/case/$(caseId)/private/contact);
+      // NGO 接手、改進度全部經 server，前端直接改只限 admin
       allow update, delete: if isAdmin();
 
       match /private/{docId} {
-        allow read: if isAdmin();
+        // admin，或者接手咗呢宗案件嘅機構
+        allow read: if isAdmin() || (docId == 'contact' && isAcceptingNgo(caseId));
         // 只可以喺「案件同一個 batch 新建」時寫入，唔可以幫舊案件補寫假資料
         allow create: if docId == 'contact'
           && !exists(/databases/$(database)/documents/case/$(caseId))
@@ -91,11 +158,7 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    match /adminuser/{uid} {
-      allow read: if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
-    }
-
+    // 其他（包括 serverLocks）一律拒絕；server 用 Admin SDK 唔受 rules 限制
     match /{document=**} {
       allow read, write: if false;
     }

@@ -1,10 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { StrayReport, NGOOrganization, UrgencyLevel, AnimalType } from '../types';
+import { StrayReport, NGOOrganization, UrgencyLevel, CaseTag } from '../types';
 import { getGoogleMapsDirectionsUrl } from '../utils/location';
-import { animalLabel } from '../utils/caseLabels';
+import {
+  ANIMAL_FILTERS, AnimalFilter, matchesAnimalFilter, animalFilterLabel, CASE_TAGS, tagLabel, matchesTagFilter,
+  statusLabel,
+} from '../utils/caseLabels';
 import L from 'leaflet';
-import { ExternalLink, Sparkles, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, Sparkles, X } from 'lucide-react';
+import { AnimalIcon, animalIconSvg } from './AnimalIcons';
+import { careIconSvg } from './BrandIcons';
 
 interface InteractiveMapProps {
   reports: StrayReport[];
@@ -25,9 +30,6 @@ function escapeHtml(str: string): string {
     .replace(/'/g, '&#39;');
 }
 
-const ANIMAL_EMOJI: Record<AnimalType, string> = { cat: '🐱', dog: '🐶', bird: '🕊️', other: '🐾' };
-const ANIMAL_FILTERS: AnimalType[] = ['cat', 'dog', 'bird'];
-
 const URGENCY_BTN: Record<UrgencyLevel, { active: string; idle: string; weight: string }> = {
   P0: { active: 'bg-rose-600 text-white', idle: 'text-rose-700 hover:bg-rose-50', weight: 'font-bold' },
   P1: { active: 'bg-amber-500 text-white', idle: 'text-amber-700 hover:bg-amber-50', weight: 'font-bold' },
@@ -35,16 +37,28 @@ const URGENCY_BTN: Record<UrgencyLevel, { active: string; idle: string; weight: 
 };
 const URGENCY_LEVELS: UrgencyLevel[] = ['P0', 'P1', 'P2'];
 
+// 同一地點（座標四捨五入到小數後 5 位，約 1 米）嘅個案合併成一個 marker
+const locationKey = (r: StrayReport) => `${r.location.lat.toFixed(5)},${r.location.lng.toFixed(5)}`;
+
+// 最緊急排先，同級就最新排先；marker 用第一宗嘅顏色同 icon
+function sortByPriority(a: StrayReport, b: StrayReport): number {
+  const byUrgency = URGENCY_LEVELS.indexOf(a.urgency) - URGENCY_LEVELS.indexOf(b.urgency);
+  return byUrgency || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+}
+
 export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = [], onSelectReport, centerCoords }) => {
   const { t } = useTranslation();
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
 
-  const [filterAnimal, setFilterAnimal] = useState<'all' | AnimalType>('all');
+  const [filterAnimal, setFilterAnimal] = useState<AnimalFilter>('all');
   const [filterUrgency, setFilterUrgency] = useState<'all' | UrgencyLevel>('all');
+  const [filterTags, setFilterTags] = useState<CaseTag[]>([]);
   const [showNGOs, setShowNGOs] = useState(true);
   const [activeReport, setActiveReport] = useState<StrayReport | null>(null);
+  // 撳咗多宗個案嘅 marker 時，顯示呢個地點嘅個案列表
+  const [activeGroup, setActiveGroup] = useState<StrayReport[] | null>(null);
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -55,7 +69,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = 
     if (!mapInstanceRef.current) {
       const defaultCenter: [number, number] = centerCoords ? [centerCoords.lat, centerCoords.lng] : [22.33, 114.17];
 
-      const map = L.map(mapContainerRef.current, { center: defaultCenter, zoom: 12, scrollWheelZoom: true });
+      const map = L.map(mapContainerRef.current, { center: defaultCenter, zoom: 12, scrollWheelZoom: true, zoomControl: false });
+      // 縮放掣放左下角：左上有篩選列、右下會彈出個案資料卡，兩邊都會遮住佢
+      L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution:
@@ -96,43 +112,67 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = 
     markersLayer.clearLayers();
 
     const filteredReports = reports.filter((r) => {
-      if (filterAnimal !== 'all' && r.animalType !== filterAnimal) return false;
+      if (!matchesAnimalFilter(r.animalType, filterAnimal)) return false;
       if (filterUrgency !== 'all' && r.urgency !== filterUrgency) return false;
+      if (!matchesTagFilter(r.tags, filterTags)) return false;
       return true;
     });
 
-    filteredReports.forEach((report) => {
+    const groups = new Map<string, StrayReport[]>();
+    filteredReports.forEach((r) => {
+      const key = locationKey(r);
+      groups.set(key, [...(groups.get(key) ?? []), r]);
+    });
+
+    groups.forEach((unsorted) => {
+      const group = [...unsorted].sort(sortByPriority);
+      const report = group[0];
+      const count = group.length;
       const isP0 = report.urgency === 'P0';
       const isP1 = report.urgency === 'P1';
       const bgCol = isP0 ? '#e11d48' : isP1 ? '#f59e0b' : '#10b981';
       const pulseAnimation = isP0 ? 'animation: pulse 1.5s infinite;' : '';
-      // emoji 同 urgency 都係受控 enum（rules 限制 P0/P1/P2），唔涉及用戶輸入
-      const emoji = ANIMAL_EMOJI[report.animalType] ?? '🐾';
+      // 動物 icon 係寫死嘅 SVG（animalType 只用嚟揀圖），urgency 亦都會 escape，唔涉及用戶輸入
+      const iconSvg = animalIconSvg(report.animalType, { className: 'w-6 h-6', active: true });
 
       const customIcon = L.divIcon({
         className: 'custom-case-pin',
         html: `
           <div style="
-            position: relative; width: 38px; height: 38px; background: ${bgCol};
-            border: 3px solid white; border-radius: 50%; display: flex;
-            align-items: center; justify-content: center; color: white;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3); font-size: 16px;
-            font-weight: bold; cursor: pointer; ${pulseAnimation}
+            position: relative; width: 40px; height: 40px; background: ${bgCol};
+            border: 2px solid white; border-radius: 50%; display: flex;
+            align-items: center; justify-content: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer; ${pulseAnimation}
           ">
-            <span>${emoji}</span>
+            <span style="
+              width: 30px; height: 30px; border-radius: 50%; background: white;
+              display: flex; align-items: center; justify-content: center; color: #1c1917;
+            ">${iconSvg}</span>
             <span style="
               position: absolute; bottom: -6px; right: -6px; background: #1c1917;
               color: white; font-size: 10px; font-weight: 800; padding: 1px 4px;
               border-radius: 9999px; border: 1px solid white;
             ">${escapeHtml(report.urgency)}</span>
+            ${count > 1 ? `<span style="
+              position: absolute; top: -7px; right: -7px; min-width: 20px; height: 20px; padding: 0 5px;
+              background: #dc2626; color: white; font-size: 11px; font-weight: 800; line-height: 16px;
+              text-align: center; border-radius: 9999px; border: 2px solid white; box-sizing: border-box;
+            ">${count}</span>` : ''}
           </div>
         `,
-        iconSize: [38, 38],
-        iconAnchor: [19, 19],
+        iconSize: [40, 40],
+        iconAnchor: [20, 20],
       });
 
       const marker = L.marker([report.location.lat, report.location.lng], { icon: customIcon });
       marker.on('click', () => {
+        if (count > 1) {
+          // 多宗個案：先列出嚟俾用戶揀，唔直接開詳情
+          setActiveReport(null);
+          setActiveGroup(group);
+          return;
+        }
+        setActiveGroup(null);
         setActiveReport(report);
         onSelectReport(report);
       });
@@ -148,13 +188,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = 
           className: 'custom-ngo-pin',
           html: `
             <div style="
-              width: 32px; height: 32px; background: #0284c7; border: 2px solid white;
-              border-radius: 8px; display: flex; align-items: center; justify-content: center;
-              color: white; box-shadow: 0 3px 8px rgba(0,0,0,0.25); font-size: 14px; cursor: pointer;
-            ">🏥</div>
+              width: 34px; height: 34px; background: white; border: 2px solid #0284c7;
+              border-radius: 50%; display: flex; align-items: center; justify-content: center;
+              box-shadow: 0 3px 8px rgba(0,0,0,0.25); cursor: pointer;
+            ">${careIconSvg(26)}</div>
           `,
-          iconSize: [32, 32],
-          iconAnchor: [16, 16],
+          iconSize: [34, 34],
+          iconAnchor: [17, 17],
         });
 
         const ngoMarker = L.marker([ngo.lat, ngo.lng], { icon: ngoIcon });
@@ -185,7 +225,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = 
       });
     }
     // t 喺依賴入面：轉語言時重新畫 popup
-  }, [reports, ngos, filterAnimal, filterUrgency, showNGOs, onSelectReport, t]);
+  }, [reports, ngos, filterAnimal, filterUrgency, filterTags, showNGOs, onSelectReport, t]);
 
   // aiAnalysis.apparentInjuries 冇被 rules 驗證結構，非陣列直接 [0] 會拖垮地圖
   const safeActiveInjuries = Array.isArray(activeReport?.aiAnalysis?.apparentInjuries)
@@ -193,7 +233,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = 
     : [];
 
   const animalBtn = (active: boolean) =>
-    `px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
+    `inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
       active ? 'bg-brand-500 text-white' : 'text-stone-700 hover:bg-stone-100'
     }`;
 
@@ -207,7 +247,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = 
             </button>
             {ANIMAL_FILTERS.map((type) => (
               <button key={type} onClick={() => setFilterAnimal(type)} className={animalBtn(filterAnimal === type)}>
-                {ANIMAL_EMOJI[type]} {animalLabel(type)}
+                <AnimalIcon type={type} active={filterAnimal === type} className="w-5 h-5 -my-1" />
+                {animalFilterLabel(type)}
               </button>
             ))}
           </div>
@@ -250,6 +291,30 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = 
             </span>
           </label>
         </div>
+
+        {/* 標籤篩選另起一行（basis-full），可以揀多個，要全部符合先顯示 */}
+        <div className="basis-full flex">
+          <div className="flex items-center gap-1 p-1.5 rounded-2xl bg-white/95 backdrop-blur border border-stone-200 shadow-md pointer-events-auto flex-wrap">
+            <span className="px-1.5 text-2xs font-semibold text-stone-400">{t('map.tagFilter')}</span>
+            {CASE_TAGS.map((tag) => {
+              const active = filterTags.includes(tag);
+              return (
+                <button
+                  key={tag}
+                  onClick={() =>
+                    setFilterTags((prev) => (prev.includes(tag) ? prev.filter((x) => x !== tag) : [...prev, tag]))
+                  }
+                  aria-pressed={active}
+                  className={`px-2 py-1 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${
+                    active ? 'bg-brand-500 text-white' : 'text-stone-700 hover:bg-stone-100'
+                  }`}
+                >
+                  #{tagLabel(tag)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {reports.length === 0 && (
@@ -261,8 +326,75 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = 
 
       <div ref={mapContainerRef} className="w-full h-full" />
 
+      {!activeReport && activeGroup && (
+        <div className="absolute bottom-4 left-4 right-4 sm:left-auto sm:right-4 sm:w-96 z-[1000] bg-white/95 backdrop-blur rounded-2xl border border-stone-200 shadow-xl p-4">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-stone-900">{t('map.casesHere', { n: activeGroup.length })}</p>
+              <p className="text-2xs text-stone-500 truncate">📍 {activeGroup[0].location.address}</p>
+            </div>
+            <button
+              onClick={() => setActiveGroup(null)}
+              aria-label={t('map.close')}
+              className="text-stone-400 hover:text-stone-600 p-1 shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <ul className="max-h-64 overflow-y-auto divide-y divide-stone-100 -mx-1">
+            {activeGroup.map((r) => (
+              <li key={r.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveReport(r);
+                    onSelectReport(r);
+                  }}
+                  className="w-full flex items-center gap-3 px-1 py-2 text-left hover:bg-stone-50 rounded-lg transition-colors cursor-pointer"
+                >
+                  <img
+                    src={r.photoUrl}
+                    alt={t('map.photoAlt')}
+                    className="w-10 h-10 rounded-lg object-cover shrink-0 border border-stone-200 bg-stone-100"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`text-2xs font-bold px-1.5 py-0.5 rounded-full text-white shrink-0 ${
+                          r.urgency === 'P0' ? 'bg-rose-600' : r.urgency === 'P1' ? 'bg-amber-500' : 'bg-emerald-600'
+                        }`}
+                      >
+                        {r.urgency}
+                      </span>
+                      <span className="text-xs font-semibold text-stone-800 truncate">{r.title}</span>
+                    </div>
+                    <p className="text-2xs text-stone-500 truncate mt-0.5">
+                      {statusLabel(r.status)} · {r.description}
+                    </p>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-stone-300 shrink-0" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {activeReport && (
         <div className="absolute bottom-4 left-4 right-4 sm:left-auto sm:right-4 sm:w-96 z-[1000] bg-white/95 backdrop-blur rounded-2xl border border-stone-200 shadow-xl p-4 transition-all">
+          {activeGroup && (
+            <button
+              type="button"
+              onClick={() => setActiveReport(null)}
+              className="inline-flex items-center gap-0.5 text-2xs font-medium text-stone-500 hover:text-stone-800 mb-2 cursor-pointer"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              {t('map.backToList')}
+            </button>
+          )}
           <div className="flex items-start justify-between gap-3 mb-2">
             <div className="flex items-center gap-2 min-w-0">
               <span
@@ -275,7 +407,10 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({ reports, ngos = 
               <span className="text-xs font-bold text-stone-800 truncate">{activeReport.title}</span>
             </div>
             <button
-              onClick={() => setActiveReport(null)}
+              onClick={() => {
+                setActiveReport(null);
+                setActiveGroup(null);
+              }}
               aria-label={t('map.close')}
               className="text-stone-400 hover:text-stone-600 p-1 shrink-0"
             >

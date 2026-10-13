@@ -2,39 +2,27 @@
   "entities": {
     "Case": {
       "title": "Stray Animal Rescue Case",
-      "description": "Rescue case table storing case ID, citizen contact, Gemini AI analysis, and Cloud Storage photo link",
+      "description": "公開案件文件（人人可讀）。報案人聯絡資料絕對唔可以放呢度，要放 CaseContact。",
       "type": "object",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique Case ID (e.g. PW-XXXXXX)",
-          "maxLength": 64,
-          "pattern": "^[a-zA-Z0-9_\\-]+$"
-        },
-        "title": {
-          "type": "string",
-          "description": "Case title summary",
-          "maxLength": 150
-        },
-        "animalType": {
-          "type": "string",
-          "description": "Reported animal species",
-          "enum": ["cat", "dog", "bird", "other"]
-        },
-        "customAnimalName": {
-          "type": "string",
-          "description": "Citizen custom species name if other",
-          "maxLength": 100
-        },
-        "photoUrl": {
-          "type": "string",
-          "description": "Cloud Storage public download URL of animal photo",
-          "maxLength": 2048
-        },
-        "photos": {
+        "id": { "type": "string", "maxLength": 64, "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "Case ID，格式 PW-<base36 時間>-<4 位隨機>，必須等於文件 ID" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "animalType": { "type": "string", "enum": ["cat", "dog", "bird", "other"] },
+        "customAnimalName": { "type": "string", "maxLength": 100, "description": "animalType 係 other 時嘅自訂名稱" },
+        "tags": {
           "type": "array",
           "maxItems": 5,
-          "description": "全部相片（第 1 張 = photoUrl 封面）；舊案件冇呢個欄位",
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["stray", "injured", "trapped", "juvenile", "adult"] },
+          "description": "報案人揀嘅標籤（可多選），用嚟篩選；冇揀就唔會有呢個欄位"
+        },
+        "photoUrl": { "type": "string", "maxLength": 2048, "description": "封面，必須等於 photos[0].url" },
+        "storagePath": { "type": "string", "maxLength": 256, "description": "封面路徑，必須等於 photos[0].path" },
+        "photos": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "description": "全部相片，第 1 張係封面",
           "items": {
             "type": "object",
             "required": ["url", "path"],
@@ -44,144 +32,109 @@
             }
           }
         },
-        "storagePath": {
-          "type": "string",
-          "description": "Cloud Storage object path linked to this case (e.g. animal-reports/PW-XXX.jpg)",
-          "maxLength": 256
+        "location": {
+          "type": "object",
+          "required": ["lat", "lng", "address"],
+          "properties": {
+            "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+            "lng": { "type": "number", "minimum": -180, "maximum": 180 },
+            "address": { "type": "string", "minLength": 1, "maxLength": 300 },
+            "district": { "type": "string", "maxLength": 100 }
+          }
         },
-        "description": {
-          "type": "string",
-          "description": "Citizen field description of animal condition",
-          "maxLength": 2000
-        },
-        "reporterName": {
-          "type": "string",
-          "description": "Citizen reporter contact name",
-          "maxLength": 100
-        },
-        "reporterPhone": {
-          "type": "string",
-          "description": "Citizen reporter contact phone",
-          "maxLength": 50
-        },
-        "reporterEmail": {
-          "type": "string",
-          "description": "Citizen reporter contact email for case tracking",
-          "maxLength": 120
-        },
-        "createdByUid": {
-          "type": "string",
-          "description": "Auth UID or anonymous tracking token",
-          "maxLength": 128
-        },
-        "status": {
-          "type": "string",
-          "description": "Rescue progress status",
-          "enum": ["pending", "in_progress", "rescued", "closed"]
-        },
-        "urgency": {
-          "type": "string",
-          "description": "Urgency triage level",
-          "enum": ["P0", "P1", "P2"]
+        "description": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "status": { "type": "string", "enum": ["pending", "in_progress", "rescued", "closed"], "description": "新建必須係 pending；之後只可以經 server 改" },
+        "urgency": { "type": "string", "enum": ["P0", "P1", "P2"], "description": "新建必須係 P1；AI 分析後由 server 改" },
+        "createdAt": { "type": "timestamp", "description": "必須等於 request.time" },
+        "updatedAt": { "type": "timestamp" },
+        "aiAnalysis": { "type": ["object", "null"], "description": "新建必須係 null；由 server 寫入（AIAnalysisResult）" },
+        "geminiResponse": { "type": ["object", "null"], "description": "同 aiAnalysis，新建必須係 null" },
+        "matchedNGOs": { "type": ["array", "null"], "maxItems": 3 },
+        "dispatchedToNGO": { "type": ["object", "null"], "description": "新建必須係 null；由 server 寫入（ngoId, ngoName, dispatchedAt, status, simulated）" },
+        "acceptedBy": {
+          "type": "object",
+          "description": "新建唔可以有；NGO 接手時由 server 用 transaction 寫入。公開資料，唔放職員電郵",
+          "properties": {
+            "ngoId": { "type": "string" },
+            "ngoName": { "type": "string" },
+            "acceptedByUid": { "type": "string" },
+            "acceptedAt": { "type": "string", "description": "ISO 時間" }
+          }
         }
       },
-      "required": ["id", "animalType", "urgency", "status", "description"]
+      "required": ["id", "title", "animalType", "photoUrl", "storagePath", "photos", "location", "description", "status", "urgency", "createdAt"]
     },
-    "NGODatail": {
-      "title": "NGO Rescue Organization Detail",
-      "description": "NGO partner profile and operational dispatch status table",
+    "CaseContact": {
+      "title": "Reporter Contact (private)",
+      "description": "報案人聯絡資料。只有 admin 同接手咗嘅 NGO 可讀；必須同案件喺同一個 batch 新建",
       "type": "object",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique NGO identifier",
-          "maxLength": 64,
-          "pattern": "^[a-zA-Z0-9_\\-]+$"
-        },
-        "name": {
-          "type": "string",
-          "description": "Chinese name of NGO",
-          "maxLength": 120
-        },
-        "englishName": {
-          "type": "string",
-          "description": "English name of NGO",
-          "maxLength": 120
-        },
-        "hotline": {
-          "type": "string",
-          "description": "Emergency dispatch hotline",
-          "maxLength": 50
-        },
-        "whatsapp": {
-          "type": "string",
-          "description": "WhatsApp dispatch number",
-          "maxLength": 50
-        },
-        "address": {
-          "type": "string",
-          "description": "Physical headquarters or station address",
-          "maxLength": 200
-        },
-        "district": {
-          "type": "string",
-          "description": "Operating district in HK",
-          "maxLength": 100
-        },
-        "capacityStatus": {
-          "type": "string",
-          "description": "Operational load status",
-          "enum": ["available", "busy", "full"]
-        },
-        "operatingHours": {
-          "type": "string",
-          "description": "Hours of operations",
-          "maxLength": 100
-        }
+        "reporterName": { "type": "string", "maxLength": 100, "description": "匿名時係空字串" },
+        "reporterPhone": { "type": "string", "maxLength": 50, "description": "匿名時係空字串" },
+        "reporterEmail": { "type": "string", "maxLength": 254, "description": "必填（匿名都要填），用嚟寄確認信同建立報案人帳戶" },
+        "createdByUid": { "type": "string", "maxLength": 128, "description": "登入者 UID；未登入係 anonymous" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["createdByUid", "createdAt"]
+    },
+    "NGODatail": {
+      "title": "NGO Rescue Organization (public)",
+      "description": "機構公開資料，人人可讀，只有 admin 可寫。登入電郵唔可以放呢度（放 NgoUser）。完整欄位以 src/types.ts 嘅 NGOOrganization 為準",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64, "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "name": { "type": "string", "maxLength": 200, "description": "機構中文名" },
+        "englishName": { "type": "string", "maxLength": 200 },
+        "hotline": { "type": "string", "maxLength": 50 },
+        "whatsapp": { "type": "string", "maxLength": 50, "description": "連國家區號" },
+        "publicEmail": { "type": "string", "maxLength": 254, "description": "公開電郵，接手後會寄俾報案人" },
+        "website": { "type": "string", "maxLength": 300 },
+        "address": { "type": "string", "maxLength": 300 },
+        "district": { "type": "string", "maxLength": 100 },
+        "capacityStatus": { "type": "string", "enum": ["available", "busy", "full"] }
       },
       "required": ["id", "name", "hotline", "capacityStatus"]
     },
     "AdminUser": {
-      "title": "Platform Administrator User",
-      "description": "Admin user table authorized to manage cases, NGOs, and dispatch",
+      "title": "Administrator",
+      "description": "文件 ID = Firebase Auth UID。有文件就係 admin。只可以喺 Firebase Console 手動新增",
       "type": "object",
       "properties": {
-        "uid": {
-          "type": "string",
-          "description": "Firebase Auth UID of administrator",
-          "maxLength": 128
-        },
-        "email": {
-          "type": "string",
-          "description": "Authorized administrator email",
-          "maxLength": 120
-        },
-        "name": {
-          "type": "string",
-          "description": "Administrator display name",
-          "maxLength": 100
-        },
-        "role": {
-          "type": "string",
-          "description": "Administrative permission tier",
-          "enum": ["admin", "superadmin"]
-        }
+        "email": { "type": "string", "maxLength": 254, "description": "只供參考，程式唔會用" }
       },
-      "required": ["uid", "email", "role"]
+      "required": []
+    },
+    "NgoUser": {
+      "title": "NGO Login Account",
+      "description": "文件 ID = Firebase Auth UID。有文件就係 NGO。由 server（admin 經後台）建立，前端唔可以寫",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 254, "description": "登入電郵（唔公開）" },
+        "ngoId": { "type": "string", "maxLength": 64, "description": "對應 ngodatail/{ngoId}" },
+        "createdAt": { "type": "timestamp" },
+        "createdBy": { "type": "string", "description": "建立帳戶嘅 admin UID" }
+      },
+      "required": ["uid", "email", "ngoId", "createdAt"]
+    },
+    "UserCases": {
+      "title": "Reporter's Case List",
+      "description": "文件 ID = 報案人 UID。由 server 寄確認信時寫入，只有本人可讀",
+      "type": "object",
+      "properties": {
+        "caseIds": { "type": "array", "items": { "type": "string" } },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["caseIds"]
     }
   },
   "firestore": {
-    "/case/{caseId}": {
-      "schema": "Case",
-      "description": "Primary case table storing all stray animal rescue reports, citizen contact, Gemini AI answer, and Cloud Storage photo linkage"
-    },
-    "/ngodatail/{ngoId}": {
-      "schema": "NGODatail",
-      "description": "NGO detail table storing partner rescue organizations, emergency contact hotlines, and dispatch status"
-    },
-    "/adminuser/{adminId}": {
-      "schema": "AdminUser",
-      "description": "Admin user table authorizing backend management and database operations"
-    }
+    "/case/{caseId}": { "schema": "Case", "description": "讀：公開。新建：任何人（嚴格驗證）。更新／刪除：admin（NGO 經 server API）" },
+    "/case/{caseId}/private/contact": { "schema": "CaseContact", "description": "讀：admin 同接手咗嘅 NGO。只可以同案件同一個 batch 新建" },
+    "/ngodatail/{ngoId}": { "schema": "NGODatail", "description": "讀：公開。寫：admin" },
+    "/adminuser/{uid}": { "schema": "AdminUser", "description": "讀：本人。寫：禁止（Console 手動）" },
+    "/ngouser/{uid}": { "schema": "NgoUser", "description": "讀：本人同 admin。寫：只限 server" },
+    "/usercases/{uid}": { "schema": "UserCases", "description": "讀：本人。寫：只限 server" },
+    "/serverLocks/{kind}_{caseId}": { "description": "claimOnce 用，確保每宗案件每種動作只做一次。前端完全唔可以讀寫" }
   }
 }

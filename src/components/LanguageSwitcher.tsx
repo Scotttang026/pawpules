@@ -4,11 +4,17 @@ import { Globe } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { SUPPORTED_LANGUAGES } from '../i18n';
 
-export const LanguageSwitcher: React.FC<{ className?: string }> = ({ className = '' }) => {
+// direction：row = 地球 icon 喺語言名左邊（手機頂部 header）；column = icon 喺上面（桌面左邊 bar，同其他 menu item 一致）
+export const LanguageSwitcher: React.FC<{ className?: string; direction?: 'row' | 'column' }> = ({
+  className = '',
+  direction = 'column',
+}) => {
   const { t, i18n } = useTranslation();
 
   return (
-    <label className={`flex flex-col items-center gap-0.5 text-stone-700 cursor-pointer ${className}`}>
+    <label
+      className={`flex ${direction === 'row' ? 'flex-row gap-1' : 'flex-col gap-0.5'} items-center text-stone-700 cursor-pointer ${className}`}
+    >
       <Globe className="w-4 h-4" aria-hidden="true" />
       <select
         value={i18n.resolvedLanguage ?? 'zh'}

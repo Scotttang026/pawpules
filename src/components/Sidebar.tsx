@@ -1,28 +1,47 @@
 // src/components/Sidebar.tsx
-import React from 'react';
-import { PawPrint, MapPin, LayoutList, Building2, ShieldCheck, ShieldAlert, HeartPulse, LogIn, LogOut } from 'lucide-react';
+import React, { useCallback, useState } from 'react';
+import {
+  PawPrint, MapPin, LayoutList, Building2, ShieldCheck, ShieldAlert, HeartPulse,
+  LogIn, LogOut, ClipboardList, Briefcase,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { User } from 'firebase/auth';
 import { useAuth } from '../contexts/AuthContext';
+import type { UserRole } from '../types';
 import { LanguageSwitcher } from './LanguageSwitcher';
+import { ConfirmDialog } from './ConfirmDialog';
 
-export type AppTab = 'report' | 'map' | 'cases' | 'ngos' | 'admin';
+export type AppTab = 'report' | 'map' | 'cases' | 'ngos' | 'mycases' | 'ngo' | 'admin';
+
+type NavItem = { tab: AppTab; labelKey: string; icon: React.ElementType };
+
+// 人人都見到嘅分頁
+const PUBLIC_NAV_ITEMS: NavItem[] = [
+  { tab: 'report', labelKey: 'nav.report', icon: HeartPulse },
+  { tab: 'map', labelKey: 'nav.map', icon: MapPin },
+  { tab: 'cases', labelKey: 'nav.cases', icon: LayoutList },
+  { tab: 'ngos', labelKey: 'nav.ngos', icon: Building2 },
+];
+
+// 第 5 格：跟登入身份變；亦係登入後自動跳去嘅頁面
+export const ROLE_NAV_ITEM: Record<UserRole, NavItem> = {
+  user: { tab: 'mycases', labelKey: 'nav.myCases', icon: ClipboardList },
+  ngo: { tab: 'ngo', labelKey: 'nav.ngoWorkspace', icon: Briefcase },
+  admin: { tab: 'admin', labelKey: 'nav.admin', icon: ShieldCheck },
+};
+
+/** 只有特定身份先可以入嘅分頁 */
+export function isRoleTab(tab: AppTab): boolean {
+  return tab === 'mycases' || tab === 'ngo' || tab === 'admin';
+}
 
 interface SidebarProps {
   currentTab: AppTab;
   onSelectTab: (tab: AppTab) => void;
   onOpenGuide: () => void;
+  onOpenLogin: () => void;
   urgentCount: number;
 }
-
-// 保持向下相容（如有其他檔案 import 呢個常數）
-export const NAV_ITEMS_CONFIG: { tab: AppTab; labelKey: string; icon: React.ElementType }[] = [
-  { tab: 'report', labelKey: 'nav.report', icon: HeartPulse },
-  { tab: 'map', labelKey: 'nav.map', icon: MapPin },
-  { tab: 'cases', labelKey: 'nav.cases', icon: LayoutList },
-  { tab: 'ngos', labelKey: 'nav.ngos', icon: Building2 },
-  { tab: 'admin', labelKey: 'nav.admin', icon: ShieldCheck },
-];
 
 const Badge: React.FC<{ count: number; ringClass?: string }> = ({ count, ringClass = 'ring-stone-100' }) => (
   <span
@@ -49,21 +68,74 @@ const UserAvatar: React.FC<{ user: User | null; size: string }> = ({ user, size 
 
 /**
  * 桌面：左邊 icon rail。
- * 手機：頂部 header（logo / 語言 / 急救指引 / 登入）＋底部 5 格 tab bar。
+ * 手機：頂部 header（logo / 語言 / 急救指引 / 登入）＋底部 5 格 tab bar（第 5 格跟身份變）。
  */
-export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onOpenGuide, urgentCount }) => {
-  const { user, isAdmin, signInWithGoogle, signOut } = useAuth();
+export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onOpenGuide, onOpenLogin, urgentCount }) => {
+  const { user, role, signOut } = useAuth();
   const { t } = useTranslation();
 
+  // 登出前要先確認，避免誤撳頭像就即刻登出
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
+  const closeLogoutConfirm = useCallback(() => setConfirmingLogout(false), []);
+
+  const roleItem = role ? ROLE_NAV_ITEM[role] : null;
+  const navItems = roleItem ? [...PUBLIC_NAV_ITEMS, roleItem] : PUBLIC_NAV_ITEMS;
+
   const handleAuthClick = () => {
-    if (user) {
-      signOut().catch((err) => console.warn('Sign out failed:', err));
-    } else {
-      signInWithGoogle().catch((err) => console.warn('Sign in failed:', err));
-    }
+    if (user) setConfirmingLogout(true);
+    else onOpenLogin();
   };
 
-  const authTitle = user ? `${user.email ?? ''} (${t('nav.clickToLogout')})` : t('nav.loginWithGoogle');
+  const handleConfirmLogout = () => {
+    setConfirmingLogout(false);
+    signOut().catch((err) => console.warn('Sign out failed:', err));
+  };
+
+  const authTitle = user ? `${user.email ?? ''} (${t('nav.clickToLogout')})` : t('nav.login');
+
+  const renderRailTab = ({ tab, labelKey, icon: Icon }: NavItem) => {
+    const active = currentTab === tab;
+    return (
+      <button
+        key={tab}
+        id={`nav-${tab}-tab`}
+        onClick={() => onSelectTab(tab)}
+        aria-current={active ? 'page' : undefined}
+        title={t(labelKey)}
+        className={`group w-16 py-2 rounded-xl flex flex-col items-center gap-1 text-stone-900 transition-colors cursor-pointer ${
+          active ? 'bg-brand-50' : 'hover:bg-stone-200/60'
+        }`}
+      >
+        <span className="relative">
+          <Icon className={`w-5 h-5 ${active ? 'text-brand-500' : ''}`} strokeWidth={active ? 2.2 : 1.8} />
+          {tab === 'cases' && urgentCount > 0 && <Badge count={urgentCount} />}
+        </span>
+        <span className={`max-w-full px-1 truncate text-2xs ${active ? 'font-semibold' : 'font-medium'}`}>
+          {t(labelKey)}
+        </span>
+      </button>
+    );
+  };
+
+  const renderMobileTab = ({ tab, labelKey, icon: Icon }: NavItem) => {
+    const active = currentTab === tab;
+    return (
+      <button
+        key={tab}
+        onClick={() => onSelectTab(tab)}
+        aria-current={active ? 'page' : undefined}
+        className="h-16 flex flex-col items-center justify-center gap-0.5 text-stone-900 cursor-pointer"
+      >
+        <span className="relative">
+          <Icon className={`w-5 h-5 ${active ? 'text-brand-500' : ''}`} strokeWidth={active ? 2.2 : 1.8} />
+          {tab === 'cases' && urgentCount > 0 && <Badge count={urgentCount} ringClass="ring-white" />}
+        </span>
+        <span className={`w-full px-0.5 truncate text-center text-2xs ${active ? 'font-semibold' : 'font-medium'}`}>
+          {t(labelKey)}
+        </span>
+      </button>
+    );
+  };
 
   return (
     <>
@@ -78,37 +150,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onOpe
           <PawPrint className="w-6 h-6" />
         </button>
 
-        <nav className="mt-8 flex flex-col items-center gap-2">
-          {NAV_ITEMS_CONFIG.map(({ tab, labelKey, icon: Icon }) => {
-            const active = currentTab === tab;
-            return (
-              <button
-                key={tab}
-                id={`nav-${tab}-tab`}
-                onClick={() => onSelectTab(tab)}
-                aria-current={active ? 'page' : undefined}
-                title={t(labelKey)}
-                className={`group w-16 py-2 rounded-xl flex flex-col items-center gap-1 text-stone-900 transition-colors cursor-pointer ${
-                  active ? 'bg-brand-50' : 'hover:bg-stone-200/60'
-                }`}
-              >
-                <span className="relative">
-                  <Icon className={`w-5 h-5 ${active ? 'text-brand-500' : ''}`} strokeWidth={active ? 2.2 : 1.8} />
-                  {tab === 'cases' && urgentCount > 0 && <Badge count={urgentCount} />}
-                  {tab === 'admin' && isAdmin && (
-                    <span
-                      className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-stone-100"
-                      title={t('nav.adminActive')}
-                    />
-                  )}
-                </span>
-                <span className={`max-w-full px-1 truncate text-2xs ${active ? 'font-semibold' : 'font-medium'}`}>
-                  {t(labelKey)}
-                </span>
-              </button>
-            );
-          })}
-        </nav>
+        <nav className="mt-8 flex flex-col items-center gap-2">{navItems.map(renderRailTab)}</nav>
 
         <div className="mt-auto flex flex-col items-center gap-2">
           <LanguageSwitcher className="py-1" />
@@ -158,7 +200,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onOpe
           </button>
 
           <div className="ml-auto flex items-center gap-1">
-            <LanguageSwitcher className="px-1" />
+            <LanguageSwitcher direction="row" className="px-1" />
 
             <button
               id="nav-guide-btn-mobile"
@@ -182,33 +224,36 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onOpe
         </div>
       </header>
 
-      {/* ───────── 手機：底部 tab bar（5 個分頁） ───────── */}
+      {/* ───────── 手機：底部 tab bar（4 個公開分頁 + 1 格跟身份變） ───────── */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-stone-200 pb-[env(safe-area-inset-bottom)]">
         <div className="grid grid-cols-5">
-          {NAV_ITEMS_CONFIG.map(({ tab, labelKey, icon: Icon }) => {
-            const active = currentTab === tab;
-            return (
-              <button
-                key={tab}
-                onClick={() => onSelectTab(tab)}
-                aria-current={active ? 'page' : undefined}
-                className="h-16 flex flex-col items-center justify-center gap-0.5 text-stone-900 cursor-pointer"
-              >
-                <span className="relative">
-                  <Icon className={`w-5 h-5 ${active ? 'text-brand-500' : ''}`} strokeWidth={active ? 2.2 : 1.8} />
-                  {tab === 'cases' && urgentCount > 0 && <Badge count={urgentCount} ringClass="ring-white" />}
-                  {tab === 'admin' && isAdmin && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white" />
-                  )}
-                </span>
-                <span className={`w-full px-0.5 truncate text-center text-2xs ${active ? 'font-semibold' : 'font-medium'}`}>
-                  {t(labelKey)}
-                </span>
-              </button>
-            );
-          })}
+          {PUBLIC_NAV_ITEMS.map(renderMobileTab)}
+          {roleItem ? (
+            renderMobileTab(roleItem)
+          ) : !user ? (
+            <button
+              onClick={onOpenLogin}
+              className="h-16 flex flex-col items-center justify-center gap-0.5 text-stone-900 cursor-pointer"
+            >
+              <LogIn className="w-5 h-5" strokeWidth={1.8} />
+              <span className="w-full px-0.5 truncate text-center text-2xs font-medium">{t('nav.login')}</span>
+            </button>
+          ) : (
+            // 已登入但身份仲讀緊：留空位，唔好閃出「登入」
+            <div aria-hidden="true" />
+          )}
         </div>
       </nav>
+
+      <ConfirmDialog
+        open={confirmingLogout && !!user}
+        title={t('nav.logoutConfirmTitle')}
+        message={t('nav.logoutConfirmBody', { email: user?.email ?? '' })}
+        confirmLabel={t('nav.logout')}
+        cancelLabel={t('common.cancel')}
+        onConfirm={handleConfirmLogout}
+        onCancel={closeLogoutConfirm}
+      />
     </>
   );
 };

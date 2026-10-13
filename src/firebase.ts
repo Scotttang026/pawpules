@@ -82,24 +82,3 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   // 拋出畀呼叫方嗰個 Error 唔含任何 PII
   throw new Error(`Firestore ${operationType} failed at ${path ?? 'unknown path'}`);
 }
-
-/**
- * Startup connectivity test as specified in the Firebase Skill instructions.
- * 改用 error.code（結構化）判斷離線狀態，比對錯誤訊息文字內容更穩健。
- */
-export async function testConnection(): Promise<boolean> {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    return true;
-  } catch (error: any) {
-    if (error?.code === 'unavailable') {
-      console.warn('Firestore offline or connecting: please check Firebase network status.');
-      return false;
-    }
-    // Test doc 可能不存在，或者 Rules 拒絕讀取 /test，屬於預期行為
-    return true;
-  }
-}
-
-// Perform initial connection test
-testConnection().catch((err) => console.warn('Firebase init test notice:', err));
