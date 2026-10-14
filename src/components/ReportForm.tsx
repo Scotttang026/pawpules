@@ -287,8 +287,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
       return;
     }
 
-    // 只得標籤行唔算填咗現場狀況
-        // 揀標籤或者打字，兩樣有一樣就得
+    // 揀標籤或者打字，兩樣有一樣就得
     if (!hasDescription) {
       alert(t('reportForm.errors.noDescription'));
       return;
@@ -696,6 +695,13 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
                 })}
               </div>
             </div>
+            <textarea
+              rows={4}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={t('reportForm.description.placeholder')}
+              className={`${inputClass} resize-y`}
+            />
           </FormSection>
 
           <FormSection
