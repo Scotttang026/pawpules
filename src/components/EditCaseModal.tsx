@@ -101,6 +101,8 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
   const notYetUploaded = pending.filter((p) => !uploadedRef.current.has(p.id));
   const total = kept.length + pending.length;
   const canAdd = total < MAX_CASE_PHOTOS && notYetUploaded.length < freeSlots.length;
+    // 揀咗標籤或者有打字，其中一樣就得（同報案表單一致）
+  const hasDescription = tags.length > 0 || !!stripTagLine(description).trim();
 
   const removeExisting = (path: string) => {
     setRemoved((prev) => new Set(prev).add(path));
@@ -181,7 +183,7 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
       setErrorKey('editCase.errors.noPhoto');
       return;
     }
-    if (!stripTagLine(description).trim()) {
+    if (!hasDescription) {
       setErrorKey('reportForm.errors.noDescription');
       return;
     }
