@@ -9,6 +9,7 @@ import { getStorage } from "firebase-admin/storage";
 import { getFirestore, FieldValue, Timestamp, Firestore } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 import { AIAnalysisResult } from "./src/types";
+import { LOCALES, DEFAULT_LANG as APP_DEFAULT_LANG, toAppLang, type AppLang } from "./src/locales";
 
 // 先讀 .env.local（本機開發），再讀 .env；同一個 key 以先讀到嘅為準
 dotenv.config({ path: [".env.local", ".env"], quiet: true });
@@ -32,7 +33,7 @@ app.use("/api", (req: Request, res: Response, next: NextFunction) => {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept-Language");
     res.setHeader("Access-Control-Max-Age", "86400");
   }
   if (req.method === "OPTIONS") {
@@ -82,26 +83,27 @@ function getClientIp(req: Request): string {
   return req.ip || req.socket.remoteAddress || "unknown";
 }
 
-function makeRateLimit(prefix: string, limit: number, windowSeconds: number, message: string) {
+// messageKey = locales JSON 入面 server.errors.* 嘅 key
+function makeRateLimit(prefix: string, limit: number, windowSeconds: number, messageKey: string) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const { allowed, remaining } = await rateLimiter.isAllowed(`${prefix}_${getClientIp(req)}`, limit, windowSeconds);
     res.setHeader("X-RateLimit-Remaining", remaining);
     if (!allowed) {
-      res.status(429).json({ error: message });
+      res.status(429).json({ error: errMsg(req, messageKey) });
       return;
     }
     next();
   };
 }
 
-const aiRateLimitMiddleware = makeRateLimit("ai", 15, 60, "請求過於頻繁，請稍候 1 分鐘後再試");
-const uploadRateLimitMiddleware = makeRateLimit("upload", 20, 60, "上傳過於頻繁，請稍候再試");
-const geocodeRateLimitMiddleware = makeRateLimit("geocode", 30, 60, "地址查詢請求過於頻繁，請稍候再試");
-const placesRateLimitMiddleware = makeRateLimit("places", 60, 60, "搜尋太頻密，請稍後再試。");
-const emailIpRateLimitMiddleware = makeRateLimit("email_ip", 10, 300, "發信過於頻繁，請稍後再試");
-const dispatchRateLimitMiddleware = makeRateLimit("dispatch", 10, 300, "派送過於頻繁，請稍後再試");
-const adminRateLimitMiddleware = makeRateLimit("admin", 60, 60, "操作過於頻繁，請稍後再試");
-const caseActionRateLimitMiddleware = makeRateLimit("case_action", 30, 60, "操作過於頻繁，請稍後再試");
+const aiRateLimitMiddleware = makeRateLimit("ai", 15, 60, "rateAi");
+const uploadRateLimitMiddleware = makeRateLimit("upload", 20, 60, "rateUpload");
+const geocodeRateLimitMiddleware = makeRateLimit("geocode", 30, 60, "rateGeocode");
+const placesRateLimitMiddleware = makeRateLimit("places", 60, 60, "ratePlaces");
+const emailIpRateLimitMiddleware = makeRateLimit("email_ip", 10, 300, "rateEmail");
+const dispatchRateLimitMiddleware = makeRateLimit("dispatch", 10, 300, "rateDispatch");
+const adminRateLimitMiddleware = makeRateLimit("admin", 60, 60, "rateAction");
+const caseActionRateLimitMiddleware = makeRateLimit("case_action", 30, 60, "rateAction");
 
 // AI 每日總上限（每個 Cloud Run instance 各自計），防止有人狂打燒晒 Gemini 額度
 const AI_DAILY_LIMIT = Number(process.env.AI_DAILY_LIMIT) || 500;
@@ -172,24 +174,10 @@ const MAX_NGO_ACCOUNTS = 5; // 每間機構最多幾多個登入帳戶
 const EDIT_WINDOW_MS = 24 * 60 * 60 * 1000; // 報案人 24 小時內可以改
 const MAX_REPORTER_EDITS = 1;               // 只可以改 1 次
 const TAG_RE = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
+// 原因／類別嘅顯示名放喺 locales JSON：server.labels.deleteReason.* / server.labels.contactCategory.*
 const DELETE_REASONS = new Set(["duplicate", "resolved", "wrong_info", "privacy", "mistake", "other"]);
-const DELETE_REASON_ZH: Record<string, string> = {
-  duplicate: "重複通報",
-  resolved: "動物已獲救／已離開現場",
-  wrong_info: "資料填錯",
-  privacy: "相片或內容涉及私隱",
-  mistake: "誤報",
-  other: "其他",
-};
 const NORMAL_STATUSES = ["pending", "in_progress", "rescued", "closed"];
 const CONTACT_CATEGORIES = new Set(["update", "delete", "photo", "status", "other"]);
-const CONTACT_CATEGORY_ZH: Record<string, string> = {
-  update: "更新案件內容",
-  delete: "刪除案件",
-  photo: "相片問題",
-  status: "查詢救援進度",
-  other: "其他",
-};
 
 // 案件相片路徑：只接受 photos[].path 入面屬於呢宗案件資料夾嘅路徑，唔信 Firestore 入面任意字串
 function casePhotoPaths(caseId: string, data: Record<string, any> | undefined): string[] {
@@ -241,10 +229,6 @@ function getPublicBaseUrl(req: Request): string {
   return (process.env.PUBLIC_BASE_URL || fallbackBase).replace(/\/$/, "");
 }
 
-function isZh(lang: string): boolean {
-  return lang.toLowerCase().startsWith("zh");
-}
-
 // ---------- 寄信（Gmail SMTP；未設定就模擬，喺 terminal 印出）----------
 
 const GMAIL_USER = (process.env.GMAIL_USER || "").trim();
@@ -263,6 +247,36 @@ function getMailer(): Transporter | null {
 }
 
 const MAIL_FROM_NAME = (process.env.MAIL_FROM_NAME || "PawPulse 管理員").trim();
+
+// ---------- i18n：同前端共用 src/locales/*.json ----------
+// 只支援 {{變數}}，唔支援 i18next 嘅 _one / _other 複數 key
+function tr(lang: AppLang, key: string, vars: Record<string, unknown> = {}): string {
+  const pick = (obj: unknown) =>
+    key.split(".").reduce<any>((o, k) => (o && typeof o === "object" ? o[k] : undefined), obj);
+  const s = pick(LOCALES[lang].translation) ?? pick(LOCALES[APP_DEFAULT_LANG].translation);
+  if (typeof s !== "string") return key;
+  return s.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, v) => String(vars[v] ?? ""));
+}
+
+// 搵唔到翻譯就用 fallback（例如資料庫入面有未知狀態）
+function trOr(lang: AppLang, key: string, fallback: string, vars?: Record<string, unknown>): string {
+  const s = tr(lang, key, vars);
+  return s === key ? fallback : s;
+}
+
+function statusLabel(lang: AppLang, status: string): string {
+  return trOr(lang, `status.${status}`, status);
+}
+
+// request 嘅語言：前端明確傳入嘅 lang → Accept-Language header → 中文
+function reqLang(req: Request, explicit?: unknown): AppLang {
+  return toAppLang(resolveLang(req, explicit ?? req.body?.lang ?? req.query?.lang));
+}
+
+// API 錯誤訊息：server.errors.{key}
+function errMsg(req: Request, key: string, vars?: Record<string, unknown>): string {
+  return tr(reqLang(req), `server.errors.${key}`, vars);
+}
 
 async function sendMail(
   to: string,
@@ -286,7 +300,6 @@ async function sendMail(
   console.log(`[EMAIL] sent → ${maskEmail(to)} | ${subject}`);
   return { simulated: false };
 }
-
 
 // ---------- 登入身份 ----------
 // admin：Firestore 有 adminuser/{uid} 文件
@@ -522,14 +535,14 @@ function getGoogleMapsApiKey(): string | undefined {
 app.get("/api/geocode", geocodeRateLimitMiddleware, async (req: Request, res: Response) => {
   const address = typeof req.query.address === "string" ? req.query.address.trim().slice(0, 200) : "";
   if (!address) {
-    res.status(400).json({ error: "Missing address parameter" });
+    res.status(400).json({ error: errMsg(req, "missingAddress") });
     return;
   }
 
   const apiKey = getGoogleMapsApiKey();
   if (!apiKey) {
     console.error("[Geocode] GOOGLE_MAPS_API_KEY not set in environment");
-    res.status(500).json({ error: "Geocoding service not configured" });
+    res.status(500).json({ error: errMsg(req, "geocodeNotConfigured") });
     return;
   }
 
@@ -547,7 +560,7 @@ app.get("/api/geocode", geocodeRateLimitMiddleware, async (req: Request, res: Re
 
     if (data.status !== "OK" || !data.results?.length) {
       console.warn("[Geocode] No results:", data.status, data.error_message);
-      res.status(404).json({ error: "Address not found", status: data.status });
+      res.status(404).json({ error: errMsg(req, "addressNotFound"), status: data.status });
       return;
     }
 
@@ -566,7 +579,7 @@ app.get("/api/geocode", geocodeRateLimitMiddleware, async (req: Request, res: Re
     });
   } catch (error) {
     console.error("[Geocode] Error:", (error as Error).message);
-    res.status(500).json({ error: "Geocoding request failed" });
+    res.status(500).json({ error: errMsg(req, "geocodeFailed") });
   }
 });
 
@@ -575,7 +588,7 @@ app.get("/api/reverse-geocode", geocodeRateLimitMiddleware, async (req: Request,
   const lng = parseFloat(String(req.query.lng));
 
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    res.status(400).json({ error: "缺少或無效的 lat/lng 參數" });
+    res.status(400).json({ error: errMsg(req, "badLatLng") });
     return;
   }
 
@@ -596,7 +609,7 @@ app.get("/api/reverse-geocode", geocodeRateLimitMiddleware, async (req: Request,
       if (data.status === "OK" && best) {
         const address =
           stripPlusCode(String(best.formatted_address ?? "")) ||
-          `經緯度座標 (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+          tr(toAppLang(lang), "server.misc.coordAddress", { lat: lat.toFixed(4), lng: lng.toFixed(4) });
         const area = await resolveArea(fromGeocodingComponents(best.address_components), lang, [address]);
         res.json({ address, district: area.district, countryCode: area.countryCode, provider: "google" });
         return;
@@ -629,7 +642,7 @@ app.get("/api/reverse-geocode", geocodeRateLimitMiddleware, async (req: Request,
     console.error("Nominatim reverse fallback 失敗:", (err as Error).message);
   }
 
-  res.status(404).json({ error: "找不到對應地址" });
+  res.status(404).json({ error: errMsg(req, "addressNotFound") });
 });
 
 // ---------- 地址自動完成（Google Places API New，全球）----------
@@ -644,7 +657,7 @@ const PLACE_ID_RE = /^[A-Za-z0-9_-]{10,300}$/;
 app.post("/api/places/autocomplete", placesRateLimitMiddleware, async (req: Request, res: Response) => {
   const apiKey = getPlacesApiKey();
   if (!apiKey) {
-    res.status(503).json({ error: "地址搜尋服務未設定" });
+    res.status(503).json({ error: errMsg(req, "placesNotConfigured") });
     return;
   }
 
@@ -686,7 +699,7 @@ app.post("/api/places/autocomplete", placesRateLimitMiddleware, async (req: Requ
     });
     if (!r.ok) {
       console.error("[Places] autocomplete HTTP", r.status, await r.text().catch(() => ""));
-      res.status(502).json({ error: "地址搜尋暫時無法使用" });
+      res.status(502).json({ error: errMsg(req, "placesUnavailable") });
       return;
     }
     const data: any = await r.json();
@@ -702,20 +715,20 @@ app.post("/api/places/autocomplete", placesRateLimitMiddleware, async (req: Requ
     res.json({ suggestions });
   } catch (err) {
     console.error("[Places] autocomplete failed:", (err as Error).message);
-    res.status(502).json({ error: "地址搜尋暫時無法使用" });
+    res.status(502).json({ error: errMsg(req, "placesUnavailable") });
   }
 });
 
 app.get("/api/places/details/:placeId", placesRateLimitMiddleware, async (req: Request, res: Response) => {
   const apiKey = getPlacesApiKey();
   if (!apiKey) {
-    res.status(503).json({ error: "地址搜尋服務未設定" });
+    res.status(503).json({ error: errMsg(req, "placesNotConfigured") });
     return;
   }
 
   const placeId = String(req.params.placeId ?? "");
   if (!PLACE_ID_RE.test(placeId)) {
-    res.status(400).json({ error: "無效地點" });
+    res.status(400).json({ error: errMsg(req, "badPlace") });
     return;
   }
 
@@ -738,14 +751,14 @@ app.get("/api/places/details/:placeId", placesRateLimitMiddleware, async (req: R
     });
     if (!r.ok) {
       console.error("[Places] details HTTP", r.status, await r.text().catch(() => ""));
-      res.status(502).json({ error: "未能取得地點資料" });
+      res.status(502).json({ error: errMsg(req, "placeDetailsFailed") });
       return;
     }
     const d: any = await r.json();
     const lat = d.location?.latitude;
     const lng = d.location?.longitude;
     if (typeof lat !== "number" || typeof lng !== "number") {
-      res.status(502).json({ error: "此地點沒有座標資料" });
+      res.status(502).json({ error: errMsg(req, "placeNoCoords") });
       return;
     }
     const address = String(d.formattedAddress ?? "");
@@ -763,7 +776,7 @@ app.get("/api/places/details/:placeId", placesRateLimitMiddleware, async (req: R
     });
   } catch (err) {
     console.error("[Places] details failed:", (err as Error).message);
-    res.status(502).json({ error: "未能取得地點資料" });
+    res.status(502).json({ error: errMsg(req, "placeDetailsFailed") });
   }
 });
 
@@ -777,39 +790,39 @@ app.post("/api/upload-photo", uploadRateLimitMiddleware, async (req: Request, re
   try {
     const { imageBase64, caseId, index } = req.body ?? {};
     if (typeof caseId !== "string" || !CASE_ID_RE.test(caseId)) {
-      res.status(400).json({ error: "案件編號格式不正確" });
+      res.status(400).json({ error: errMsg(req, "badCaseId") });
       return;
     }
 
     const idx = Number(index);
     if (!Number.isInteger(idx) || idx < 0 || idx >= MAX_CASE_PHOTOS) {
-      res.status(400).json({ error: "相片編號不正確" });
+      res.status(400).json({ error: errMsg(req, "badPhotoIndex") });
       return;
     }
     if (typeof imageBase64 !== "string" || imageBase64.length === 0) {
-      res.status(400).json({ error: "Missing imageBase64" });
+      res.status(400).json({ error: errMsg(req, "missingImage") });
       return;
     }
 
     const encoded = imageBase64.replace(/^data:image\/jpe?g;base64,/i, "");
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
-      res.status(400).json({ error: "圖片資料格式無效" });
+      res.status(400).json({ error: errMsg(req, "badImageData") });
       return;
     }
     const buffer = Buffer.from(encoded, "base64");
     if (buffer.length === 0 || buffer.length >= MAX_PHOTO_BYTES) {
-      res.status(413).json({ error: "圖片檔案過大，請先壓縮後再行上傳" });
+      res.status(413).json({ error: errMsg(req, "imageTooLarge") });
       return;
     }
     if (!isJpeg(buffer)) {
-      res.status(400).json({ error: "只接受 JPEG 相片" });
+      res.status(400).json({ error: errMsg(req, "jpegOnly") });
       return;
     }
 
     const bucket = getAdminBucket();
     if (!bucket) {
       console.error("[Upload] FIREBASE_STORAGE_BUCKET 未設定");
-      res.status(503).json({ error: "相片儲存服務未設定" });
+      res.status(503).json({ error: errMsg(req, "storageNotConfigured") });
       return;
     }
 
@@ -828,7 +841,7 @@ app.post("/api/upload-photo", uploadRateLimitMiddleware, async (req: Request, re
       });
     } catch (err: any) {
       if (err?.code === 412) {
-        res.status(409).json({ error: "此案件已有相片" });
+        res.status(409).json({ error: errMsg(req, "photoExists") });
         return;
       }
       throw err;
@@ -840,7 +853,7 @@ app.post("/api/upload-photo", uploadRateLimitMiddleware, async (req: Request, re
     res.json({ success: true, downloadUrl, storagePath: objectPath });
   } catch (err) {
     console.error("[Upload] Photo upload error:", (err as Error).message);
-    res.status(500).json({ error: "相片儲存失敗" });
+    res.status(500).json({ error: errMsg(req, "photoSaveFailed") });
   }
 });
 
@@ -1007,12 +1020,12 @@ Ensure output is strictly JSON conforming to the response schema.
 app.post("/api/cases/:caseId/analyze", aiRateLimitMiddleware, async (req: Request, res: Response) => {
   const caseId = String(req.params.caseId ?? "");
   if (!CASE_ID_RE.test(caseId)) {
-    res.status(400).json({ error: "案件編號格式不正確" });
+    res.status(400).json({ error: errMsg(req, "badCaseId") });
     return;
   }
   const bucket = getAdminBucket();
   if (!bucket) {
-    res.status(503).json({ error: "相片儲存服務未設定" });
+    res.status(503).json({ error: errMsg(req, "storageNotConfigured") });
     return;
   }
 
@@ -1020,12 +1033,12 @@ app.post("/api/cases/:caseId/analyze", aiRateLimitMiddleware, async (req: Reques
     const caseRef = getAdminDb().collection("case").doc(caseId);
     const snap = await caseRef.get();
     if (!snap.exists) {
-      res.status(404).json({ error: "找不到案件" });
+      res.status(404).json({ error: errMsg(req, "caseNotFound") });
       return;
     }
     const data = snap.data();
     if (!isFreshCase(data) || data?.aiAnalysis) {
-      res.status(409).json({ error: "此案件已分析或已超過分析時限" });
+      res.status(409).json({ error: errMsg(req, "analyzeUnavailable") });
       return;
     }
 
@@ -1033,12 +1046,12 @@ app.post("/api/cases/:caseId/analyze", aiRateLimitMiddleware, async (req: Reques
     const paths = casePhotoPaths(caseId, data);
     const images = await loadCasePhotos(bucket, paths);
     if (images.length === 0) {
-      res.status(404).json({ error: "找不到案件相片" });
+      res.status(404).json({ error: errMsg(req, "casePhotosNotFound") });
       return;
     }
 
     if (!(await claimOnce("analyze", caseId))) {
-      res.status(409).json({ error: "此案件已分析或已超過分析時限" });
+      res.status(409).json({ error: errMsg(req, "analyzeUnavailable") });
       return;
     }
 
@@ -1065,7 +1078,7 @@ app.post("/api/cases/:caseId/analyze", aiRateLimitMiddleware, async (req: Reques
     res.json({ analysis: result, urgency: result.urgencyLevel });
   } catch (err) {
     console.error("[Analyze] error:", (err as any)?.code, (err as Error).message);
-    res.status(500).json({ error: "AI 分析失敗" });
+    res.status(500).json({ error: errMsg(req, "analyzeFailed") });
   }
 });
 
@@ -1111,7 +1124,7 @@ async function linkCaseToReporter(
 app.post("/api/cases/send-confirmation-email", emailIpRateLimitMiddleware, async (req: Request, res: Response) => {
   const caseId = req.body?.caseId;
   if (typeof caseId !== "string" || !CASE_ID_RE.test(caseId)) {
-    res.status(400).json({ error: "案件編號格式不正確" });
+    res.status(400).json({ error: errMsg(req, "badCaseId") });
     return;
   }
 
@@ -1122,27 +1135,27 @@ app.post("/api/cases/send-confirmation-email", emailIpRateLimitMiddleware, async
       caseRef.collection("private").doc("contact").get(),
     ]);
     if (!caseSnap.exists || !contactSnap.exists) {
-      res.status(404).json({ error: "找不到案件" });
+      res.status(404).json({ error: errMsg(req, "caseNotFound") });
       return;
     }
     if (!isFreshCase(caseSnap.data())) {
-      res.status(409).json({ error: "只可在通報後 15 分鐘內寄出確認信" });
+      res.status(409).json({ error: errMsg(req, "confirmTooLate") });
       return;
     }
 
     const contact = contactSnap.data() ?? {};
     const email = cleanStr(contact.reporterEmail, 254).toLowerCase();
     if (!EMAIL_RE.test(email)) {
-      res.status(400).json({ error: "此案件沒有有效的電郵地址" });
+      res.status(400).json({ error: errMsg(req, "noValidEmail") });
       return;
     }
     if (!(await claimOnce("email", caseId))) {
-      res.status(409).json({ error: "確認信已寄出" });
+      res.status(409).json({ error: errMsg(req, "confirmAlreadySent") });
       return;
     }
 
-    const lang = resolveLang(req, req.body?.lang);
-    const zh = isZh(lang);
+    // 優先用報案時記低嘅語言，冇就跟 request
+    const lang = typeof contact.lang === "string" && contact.lang ? toAppLang(contact.lang) : reqLang(req);
     const baseUrl = getPublicBaseUrl(req);
     const trackingUrl = `${baseUrl}/?caseId=${encodeURIComponent(caseId)}`;
 
@@ -1153,28 +1166,22 @@ app.post("/api/cases/send-confirmation-email", emailIpRateLimitMiddleware, async
       const { needsSetup } = await linkCaseToReporter(caseId, email, createdByUid);
       if (needsSetup) {
         const link = await makeSetPasswordLink(email, baseUrl);
-        accountPart = zh
-          ? `\n\n想隨時睇返你報過嘅所有案件？我們已用此電郵為你建立帳戶，按以下連結設定密碼後即可登入「我的案件」：\n${link}`
-          : `\n\nWant to see all your reports in one place? We've created an account for this email. Set a password with this link, then sign in to "My cases":\n${link}`;
+        accountPart = tr(lang, "server.email.confirm.accountSetup", { link });
       } else {
-        accountPart = zh
-          ? `\n\n你亦可以用此電郵登入 PawPulse，在「我的案件」查看進度：\n${baseUrl}`
-          : `\n\nYou can also sign in to PawPulse with this email and check "My cases":\n${baseUrl}`;
+        accountPart = tr(lang, "server.email.confirm.accountLogin", { baseUrl });
       }
     } catch (err) {
       console.warn("[Reporter account] link failed:", (err as any)?.code, (err as Error).message);
     }
 
-    const subject = zh ? `PawPulse：已收到你的通報（${caseId}）` : `PawPulse: We received your report (${caseId})`;
-    const text = zh
-      ? `你好，\n\n多謝你通報流浪動物個案，案件編號：${caseId}\n\n你可以隨時用以下連結查看最新進度：\n${trackingUrl}${accountPart}\n\n如動物情況危急，請同時致電當地動物救援熱線。\n\nPawPulse`
-      : `Hello,\n\nThank you for reporting a stray animal. Case ID: ${caseId}\n\nYou can follow the latest progress here:\n${trackingUrl}${accountPart}\n\nIf the animal is in critical condition, please also call your local animal rescue hotline.\n\nPawPulse`;
+    const subject = tr(lang, "server.email.confirm.subject", { caseId });
+    const text = tr(lang, "server.email.confirm.body", { caseId, trackingUrl, accountPart });
 
     const { simulated } = await sendMail(email, subject, text);
     res.json({ success: true, simulated });
   } catch (err) {
     console.error("Email notification error:", (err as any)?.code, (err as Error).message);
-    res.status(500).json({ error: "發送確認信失敗" });
+    res.status(500).json({ error: errMsg(req, "confirmFailed") });
   }
 });
 
@@ -1185,7 +1192,7 @@ app.post("/api/ngo/notify", dispatchRateLimitMiddleware, async (req: Request, re
   const { reportId, ngoId } = req.body ?? {};
   if (typeof reportId !== "string" || !CASE_ID_RE.test(reportId) ||
       typeof ngoId !== "string" || !CASE_ID_RE.test(ngoId)) {
-    res.status(400).json({ error: "缺少或無效的 reportId / ngoId" });
+    res.status(400).json({ error: errMsg(req, "badDispatchInput") });
     return;
   }
 
@@ -1200,18 +1207,18 @@ app.post("/api/ngo/notify", dispatchRateLimitMiddleware, async (req: Request, re
     ]);
     const adminUid = authInfo?.role === "admin" ? authInfo.uid : null;
     if (!caseSnap.exists || !ngoSnap.exists) {
-      res.status(404).json({ error: "找不到案件或機構" });
+      res.status(404).json({ error: errMsg(req, "caseOrNgoNotFound") });
       return;
     }
 
     const caseData = caseSnap.data() ?? {};
     if (!adminUid) {
       if (!isFreshCase(caseData)) {
-        res.status(403).json({ error: "只有管理員可以派送此案件" });
+        res.status(403).json({ error: errMsg(req, "dispatchAdminOnly") });
         return;
       }
       if (caseData.dispatchedToNGO || !(await claimOnce("dispatch", reportId))) {
-        res.status(409).json({ error: "此案件已通知過救援機構" });
+        res.status(409).json({ error: errMsg(req, "alreadyDispatched") });
         return;
       }
     }
@@ -1242,11 +1249,11 @@ app.post("/api/ngo/notify", dispatchRateLimitMiddleware, async (req: Request, re
       receiptId: `DISPATCH-${Date.now().toString(36).toUpperCase()}`,
       dispatchedAt,
       dispatchedToNGO,
-      notice: "目前為測試模式，尚未真正推送至 NGO 系統。",
+      notice: tr(reqLang(req), "server.misc.dispatchSimulated"),
     });
   } catch (err) {
     console.error("[NGO notify] error:", (err as Error).message);
-    res.status(500).json({ error: "通知 NGO 失敗" });
+    res.status(500).json({ error: errMsg(req, "dispatchFailed") });
   }
 });
 
@@ -1256,15 +1263,15 @@ app.post("/api/ngo/notify", dispatchRateLimitMiddleware, async (req: Request, re
 async function requireAdmin(req: Request, res: Response): Promise<AuthInfo | null> {
   const authInfo = await getAuthInfo(req);
   if (authInfo?.role !== "admin") {
-    res.status(403).json({ error: "只有管理員可以執行此操作" });
+    res.status(403).json({ error: errMsg(req, "adminOnly") });
     return null;
   }
   return authInfo;
 }
 
-// 產生「設定密碼」連結；如果 continue URL 未加入 Firebase 授權網域，就退而求其次唔帶 URL
+// 產生「設定密碼」連結
 async function makeSetPasswordLink(email: string, baseUrl: string): Promise<string> {
-  // Firebase 只負責整連結；抽出 oobCode 駁去自己嘅 /set-password 頁（順便填姓名同帳戶名）
+  // Firebase 只負責整連結；抽出 oobCode 駁去自己嘅 /set-password 頁
   // 唔再傳 continue URL，所以唔會再撞 unauthorized-continue-uri
   const raw = await getAdminAuth().generatePasswordResetLink(email);
   const oobCode = new URL(raw).searchParams.get("oobCode");
@@ -1298,7 +1305,7 @@ class ProfileSetupError extends Error {
 app.post("/api/profile", emailIpRateLimitMiddleware, async (req: Request, res: Response) => {
   const authInfo = await getAuthInfo(req);
   if (!authInfo) {
-    res.status(401).json({ error: "請先登入", code: "unauthenticated" });
+    res.status(401).json({ error: errMsg(req, "loginRequired"), code: "unauthenticated" });
     return;
   }
 
@@ -1308,12 +1315,12 @@ app.post("/api/profile", emailIpRateLimitMiddleware, async (req: Request, res: R
   const key = username.toLowerCase();
 
   if (!firstName || !lastName) {
-    res.status(400).json({ error: "請填寫姓同名", code: "name_required" });
+    res.status(400).json({ error: errMsg(req, "nameRequired"), code: "name_required" });
     return;
   }
   // __xxx__ 係 Firestore 保留嘅文件 ID 格式
   if (!MEMBER_USERNAME_RE.test(username) || RESERVED_USERNAMES.has(key) || /^__.*__$/.test(key)) {
-    res.status(400).json({ error: "帳戶名格式不正確", code: "username_invalid" });
+    res.status(400).json({ error: errMsg(req, "usernameInvalid"), code: "username_invalid" });
     return;
   }
 
@@ -1321,10 +1328,9 @@ app.post("/api/profile", emailIpRateLimitMiddleware, async (req: Request, res: R
   const profileRef = db.collection("userprofiles").doc(authInfo.uid);
   const nameRef = db.collection("usernames").doc(key);
 
-    try {
+  try {
     let didRename = false;
     await db.runTransaction(async (tx) => {
-
       const [profileSnap, nameSnap] = await Promise.all([tx.get(profileRef), tx.get(nameRef)]);
 
       const oldUsername = profileSnap.exists ? profileSnap.get("username") : null;
@@ -1373,7 +1379,7 @@ app.post("/api/profile", emailIpRateLimitMiddleware, async (req: Request, res: R
       return;
     }
     console.error("[Profile] save failed:", (err as any)?.code, (err as Error).message);
-    res.status(500).json({ error: "儲存會員資料失敗", code: "save_failed" });
+    res.status(500).json({ error: errMsg(req, "profileSaveFailed"), code: "save_failed" });
   }
 });
 
@@ -1384,11 +1390,11 @@ app.post("/api/admin/ngo-accounts", adminRateLimitMiddleware, async (req: Reques
   const email = cleanStr(req.body?.email ?? req.body?.loginEmail, 254).toLowerCase();
   const ngoId = req.body?.ngoId;
   if (!EMAIL_RE.test(email)) {
-    res.status(400).json({ error: "登入電郵格式不正確" });
+    res.status(400).json({ error: errMsg(req, "badLoginEmail") });
     return;
   }
   if (typeof ngoId !== "string" || !CASE_ID_RE.test(ngoId)) {
-    res.status(400).json({ error: "機構編號不正確" });
+    res.status(400).json({ error: errMsg(req, "badNgoId") });
     return;
   }
 
@@ -1396,7 +1402,7 @@ app.post("/api/admin/ngo-accounts", adminRateLimitMiddleware, async (req: Reques
     const db = getAdminDb();
     const ngoSnap = await db.collection("ngodatail").doc(ngoId).get();
     if (!ngoSnap.exists) {
-      res.status(404).json({ error: "找不到機構" });
+      res.status(404).json({ error: errMsg(req, "ngoNotFound") });
       return;
     }
     const ngoName = cleanStr(ngoSnap.data()?.name, 200);
@@ -1415,21 +1421,21 @@ app.post("/api/admin/ngo-accounts", adminRateLimitMiddleware, async (req: Reques
       db.collection("ngouser").doc(uid).get(),
     ]);
     if (adminDoc.exists) {
-      res.status(409).json({ error: "此電郵係管理員帳戶，唔可以設為 NGO 帳戶" });
+      res.status(409).json({ error: errMsg(req, "emailIsAdmin") });
       return;
     }
 
     let resent = false;
     if (ngoUserDoc.exists) {
       if (ngoUserDoc.data()?.ngoId !== ngoId) {
-        res.status(409).json({ error: "此電郵已屬於其他機構" });
+        res.status(409).json({ error: errMsg(req, "emailOtherNgo") });
         return;
       }
       resent = true; // 同一間機構：重新寄設定密碼連結
     } else {
       const countSnap = await db.collection("ngouser").where("ngoId", "==", ngoId).count().get();
       if (countSnap.data().count >= MAX_NGO_ACCOUNTS) {
-        res.status(409).json({ error: `每間機構最多 ${MAX_NGO_ACCOUNTS} 個登入帳戶` });
+        res.status(409).json({ error: errMsg(req, "ngoAccountLimit", { max: MAX_NGO_ACCOUNTS }) });
         return;
       }
       await db.collection("ngouser").doc(uid).set({
@@ -1443,21 +1449,19 @@ app.post("/api/admin/ngo-accounts", adminRateLimitMiddleware, async (req: Reques
       await getAdminAuth().revokeRefreshTokens(uid).catch(() => undefined);
     }
 
-    const lang = resolveLang(req, req.body?.lang);
+    // NGO 職員未有語言紀錄，跟 admin 建立帳戶時嘅介面語言
+    const lang = reqLang(req);
     const baseUrl = getPublicBaseUrl(req);
     const link = await makeSetPasswordLink(email, baseUrl);
-    const zh = isZh(lang);
-    const subject = zh ? "PawPulse：請設定你的 NGO 帳戶密碼" : "PawPulse: Set up your NGO account password";
-    const text = zh
-      ? `你好，\n\nPawPulse 管理員已將你加入為「${ngoName}」的 NGO 帳戶（登入電郵：${email}）。\n\n請按以下連結設定密碼：\n${link}\n\n設定後，用此電郵及密碼登入：\n${baseUrl}\n\n如你沒有預期收到此電郵，可直接忽略。\n\nPawPulse`
-      : `Hello,\n\nA PawPulse administrator has added you as an NGO account for "${ngoName}" (login email: ${email}).\n\nPlease set your password using this link:\n${link}\n\nAfterwards, sign in with this email and password at:\n${baseUrl}\n\nIf you did not expect this email, you can ignore it.\n\nPawPulse`;
+    const subject = tr(lang, "server.email.ngoAccount.subject");
+    const text = tr(lang, "server.email.ngoAccount.body", { ngoName, email, link, baseUrl });
 
     const { simulated } = await sendMail(email, subject, text);
     console.log(`[NGO account] ${resent ? "resent" : "created"} ${maskEmail(email)} → ${ngoId} by ${authInfo.uid}`);
     res.json({ success: true, uid, email, ngoId, resent, simulated });
   } catch (err) {
     console.error("[NGO account create] error:", (err as any)?.code, (err as Error).message);
-    res.status(500).json({ error: "建立 NGO 帳戶失敗" });
+    res.status(500).json({ error: errMsg(req, "ngoAccountCreateFailed") });
   }
 });
 
@@ -1471,7 +1475,7 @@ app.delete(
 
     const uid = String(req.params.uid ?? req.body?.uid ?? "");
     if (!UID_RE.test(uid)) {
-      res.status(400).json({ error: "帳戶編號不正確" });
+      res.status(400).json({ error: errMsg(req, "badUid") });
       return;
     }
 
@@ -1479,7 +1483,7 @@ app.delete(
       const ref = getAdminDb().collection("ngouser").doc(uid);
       const snap = await ref.get();
       if (!snap.exists) {
-        res.status(404).json({ error: "找不到此 NGO 帳戶" });
+        res.status(404).json({ error: errMsg(req, "ngoAccountNotFound") });
         return;
       }
       await ref.delete();
@@ -1490,7 +1494,7 @@ app.delete(
       res.json({ success: true });
     } catch (err) {
       console.error("[NGO account delete] error:", (err as Error).message);
-      res.status(500).json({ error: "移除 NGO 帳戶失敗" });
+      res.status(500).json({ error: errMsg(req, "ngoAccountDeleteFailed") });
     }
   }
 );
@@ -1502,7 +1506,7 @@ app.delete("/api/admin/ngos/:ngoId", adminRateLimitMiddleware, async (req: Reque
 
   const ngoId = String(req.params.ngoId ?? "");
   if (!CASE_ID_RE.test(ngoId)) {
-    res.status(400).json({ error: "機構編號不正確" });
+    res.status(400).json({ error: errMsg(req, "badNgoId") });
     return;
   }
 
@@ -1523,9 +1527,26 @@ app.delete("/api/admin/ngos/:ngoId", adminRateLimitMiddleware, async (req: Reque
     res.json({ success: true, removedAccounts: accounts.size });
   } catch (err) {
     console.error("[Admin delete NGO] error:", (err as Error).message);
-    res.status(500).json({ error: "刪除機構失敗" });
+    res.status(500).json({ error: errMsg(req, "ngoDeleteFailed") });
   }
 });
+
+// ---------- 報案人聯絡資料（5E 通知用）----------
+// 電郵：先用報案時填嘅聯絡電郵，冇就用登入帳戶電郵
+// 語言：報案時記低嘅 lang；舊案件冇就用中文
+async function getReporterContact(caseId: string): Promise<{ email: string | null; lang: AppLang }> {
+  const snap = await getAdminDb().collection("case").doc(caseId).collection("private").doc("contact").get();
+  const d = snap.data() ?? {};
+  let email: string | null = null;
+  for (const v of [d.reporterEmail, d.accountEmail]) {
+    const e = cleanStr(v, 254).toLowerCase();
+    if (EMAIL_RE.test(e)) {
+      email = e;
+      break;
+    }
+  }
+  return { email, lang: toAppLang(d.lang) };
+}
 
 // ---------- NGO 接手案件 ----------
 // 用 transaction 防止兩間 NGO 同時搶同一宗案件；接手後寄信通知報案人
@@ -1533,13 +1554,13 @@ app.delete("/api/admin/ngos/:ngoId", adminRateLimitMiddleware, async (req: Reque
 app.post("/api/cases/:caseId/accept", caseActionRateLimitMiddleware, async (req: Request, res: Response) => {
   const caseId = String(req.params.caseId ?? "");
   if (!CASE_ID_RE.test(caseId)) {
-    res.status(400).json({ error: "案件編號格式不正確" });
+    res.status(400).json({ error: errMsg(req, "badCaseId") });
     return;
   }
 
   const authInfo = await getAuthInfo(req);
   if (authInfo?.role !== "ngo" || !authInfo.ngoId) {
-    res.status(403).json({ error: "只有 NGO 帳戶可以接手案件" });
+    res.status(403).json({ error: errMsg(req, "ngoOnly") });
     return;
   }
   const ngoId = authInfo.ngoId;
@@ -1549,7 +1570,7 @@ app.post("/api/cases/:caseId/accept", caseActionRateLimitMiddleware, async (req:
     const caseRef = db.collection("case").doc(caseId);
     const ngoSnap = await db.collection("ngodatail").doc(ngoId).get();
     if (!ngoSnap.exists) {
-      res.status(404).json({ error: "找不到你所屬嘅機構" });
+      res.status(404).json({ error: errMsg(req, "ownNgoNotFound") });
       return;
     }
     const ngo = ngoSnap.data() ?? {};
@@ -1562,9 +1583,9 @@ app.post("/api/cases/:caseId/accept", caseActionRateLimitMiddleware, async (req:
       acceptedAt: new Date().toISOString(),
     };
 
-    const pre = await getAdminDb().collection("case").doc(String(req.params.caseId)).get();
+    const pre = await caseRef.get();
     if (pre.data()?.status === "pending_deletion") {
-      res.status(409).json({ error: "此案件正等待管理員處理刪除申請", code: "pending_deletion" });
+      res.status(409).json({ error: errMsg(req, "pendingDeletion"), code: "pending_deletion" });
       return;
     }
 
@@ -1585,55 +1606,42 @@ app.post("/api/cases/:caseId/accept", caseActionRateLimitMiddleware, async (req:
     });
 
     if (outcome.code === 404) {
-      res.status(404).json({ error: "找不到案件" });
+      res.status(404).json({ error: errMsg(req, "caseNotFound") });
       return;
     }
     if (outcome.code === 409) {
-      res.status(409).json({ error: outcome.mine ? "你嘅機構已接手此案件" : "此案件已由其他機構接手" });
+      res.status(409).json({ error: errMsg(req, outcome.mine ? "alreadyAcceptedMine" : "alreadyAcceptedOther") });
       return;
     }
     if (outcome.code === 410) {
-      res.status(409).json({ error: "此案件已完結，唔可以接手" });
+      res.status(409).json({ error: errMsg(req, "caseFinished") });
       return;
     }
 
-    // 寄信通知報案人；寄唔到唔影響接手結果
+    // 寄信通知報案人（用報案人嘅語言）；寄唔到唔影響接手結果
     let emailSent = false;
     let simulated = false;
     try {
-      const reporterEmail = (await getReporterEmail(caseId)) ?? "";
-      if (EMAIL_RE.test(reporterEmail)) {
-        const lang = resolveLang(req, req.body?.lang);
-        const zh = isZh(lang);
+      const { email: reporterEmail, lang } = await getReporterContact(caseId);
+      if (reporterEmail) {
         const trackingUrl = `${getPublicBaseUrl(req)}/?caseId=${encodeURIComponent(caseId)}`;
         const hotline = cleanStr(ngo.hotline, 50);
         const whatsapp = cleanStr(ngo.whatsapp, 50);
         const publicEmail = cleanStr(ngo.publicEmail, 254);
         const website = cleanStr(ngo.website, 300);
 
-        const lines = zh
-          ? [
-              `機構：${acceptedBy.ngoName}`,
-              hotline && `電話：${hotline}`,
-              whatsapp && `WhatsApp：${whatsapp}`,
-              publicEmail && `電郵：${publicEmail}`,
-              website && `網站：${website}`,
-            ]
-          : [
-              `Organisation: ${acceptedBy.ngoName}`,
-              hotline && `Phone: ${hotline}`,
-              whatsapp && `WhatsApp: ${whatsapp}`,
-              publicEmail && `Email: ${publicEmail}`,
-              website && `Website: ${website}`,
-            ];
-        const info = lines.filter(Boolean).join("\n");
+        const info = [
+          tr(lang, "server.email.accepted.org", { v: acceptedBy.ngoName }),
+          hotline && tr(lang, "server.email.accepted.phone", { v: hotline }),
+          whatsapp && tr(lang, "server.email.accepted.whatsapp", { v: whatsapp }),
+          publicEmail && tr(lang, "server.email.accepted.email", { v: publicEmail }),
+          website && tr(lang, "server.email.accepted.website", { v: website }),
+        ]
+          .filter(Boolean)
+          .join("\n");
 
-        const subject = zh
-          ? `PawPulse：你通報的案件 ${caseId} 已有救援機構接手`
-          : `PawPulse: A rescue organisation has accepted case ${caseId}`;
-        const text = zh
-          ? `你好，\n\n你通報的案件（${caseId}）已由以下救援機構接手：\n\n${info}\n\n查看最新進度：\n${trackingUrl}\n\nPawPulse`
-          : `Hello,\n\nYour report (${caseId}) has been accepted by the following rescue organisation:\n\n${info}\n\nFollow the latest progress:\n${trackingUrl}\n\nPawPulse`;
+        const subject = tr(lang, "server.email.accepted.subject", { caseId });
+        const text = tr(lang, "server.email.accepted.body", { caseId, info, trackingUrl });
 
         simulated = (await sendMail(reporterEmail, subject, text)).simulated;
         emailSent = true;
@@ -1646,7 +1654,7 @@ app.post("/api/cases/:caseId/accept", caseActionRateLimitMiddleware, async (req:
     res.json({ success: true, acceptedBy, emailSent, simulated });
   } catch (err) {
     console.error("[Accept] error:", (err as Error).message);
-    res.status(500).json({ error: "接手案件失敗" });
+    res.status(500).json({ error: errMsg(req, "acceptFailed") });
   }
 });
 
@@ -1656,25 +1664,43 @@ app.post("/api/cases/:caseId/accept", caseActionRateLimitMiddleware, async (req:
 const CASE_STATUSES = new Set(["pending", "in_progress", "rescued", "closed"]);
 const NGO_ALLOWED_STATUSES = new Set(["in_progress", "rescued", "closed"]);
 
+// 狀態改變：寄 email 俾報案人（用報案人嘅語言）；失敗唔影響更新結果
+async function emailReporterStatus(req: Request, caseId: string, status: string, title: string, ngoName?: string) {
+  try {
+    const { email, lang } = await getReporterContact(caseId);
+    if (!email) return;
+    const vars = {
+      caseId,
+      title,
+      status: statusLabel(lang, status),
+      ngoLine: ngoName ? tr(lang, "server.email.status.ngoLine", { ngo: ngoName }) : "",
+      trackingUrl: `${getPublicBaseUrl(req)}/?caseId=${encodeURIComponent(caseId)}`,
+    };
+    await sendMail(email, tr(lang, "server.email.status.subject", vars), tr(lang, "server.email.status.body", vars));
+  } catch (err) {
+    console.warn("[Notify] status email failed:", (err as Error).message);
+  }
+}
+
 app.post("/api/cases/:caseId/status", caseActionRateLimitMiddleware, async (req: Request, res: Response) => {
   const caseId = String(req.params.caseId ?? "");
   const status = req.body?.status;
   if (!CASE_ID_RE.test(caseId)) {
-    res.status(400).json({ error: "案件編號格式不正確" });
+    res.status(400).json({ error: errMsg(req, "badCaseId") });
     return;
   }
   if (typeof status !== "string" || !CASE_STATUSES.has(status)) {
-    res.status(400).json({ error: "案件狀態不正確" });
+    res.status(400).json({ error: errMsg(req, "badStatus") });
     return;
   }
 
   const authInfo = await getAuthInfo(req);
   if (authInfo?.role !== "admin" && authInfo?.role !== "ngo") {
-    res.status(403).json({ error: "你冇權限更新案件" });
+    res.status(403).json({ error: errMsg(req, "noPermission") });
     return;
   }
   if (authInfo.role === "ngo" && !NGO_ALLOWED_STATUSES.has(status)) {
-    res.status(403).json({ error: "NGO 唔可以將案件改返做待處理" });
+    res.status(403).json({ error: errMsg(req, "ngoNoPending") });
     return;
   }
 
@@ -1695,11 +1721,11 @@ app.post("/api/cases/:caseId/status", caseActionRateLimitMiddleware, async (req:
     });
 
     if (outcome.code === 404) {
-      res.status(404).json({ error: "找不到案件" });
+      res.status(404).json({ error: errMsg(req, "caseNotFound") });
       return;
     }
     if (outcome.code === 403) {
-      res.status(403).json({ error: "只有接手此案件嘅機構可以更新進度" });
+      res.status(403).json({ error: errMsg(req, "notAcceptingNgo") });
       return;
     }
 
@@ -1710,10 +1736,9 @@ app.post("/api/cases/:caseId/status", caseActionRateLimitMiddleware, async (req:
     res.json({ success: true, status });
   } catch (err) {
     console.error("[Status] error:", (err as Error).message);
-    res.status(500).json({ error: "更新案件狀態失敗" });
+    res.status(500).json({ error: errMsg(req, "statusUpdateFailed") });
   }
 });
-
 
 // ---------- 報案人修改案件（5B-1）----------
 // 舊相全部保留；新相只可以放喺同一個資料夾嘅空位（0–4.jpg），總數最多 5 張
@@ -1773,7 +1798,7 @@ app.post("/api/cases/:caseId/edit", caseActionRateLimitMiddleware, async (req: R
   }
   const bucket = getAdminBucket();
   if (!bucket) {
-    res.status(503).json({ error: "相片儲存服務未設定" });
+    res.status(503).json({ error: errMsg(req, "storageNotConfigured") });
     return;
   }
 
@@ -1934,6 +1959,14 @@ async function getAdminEmails(): Promise<string[]> {
   return Array.from(out);
 }
 
+// 寄俾 admin 嘅信一律用預設語言（中文）
+function adminCaseLink(caseId: string): string {
+  const base = String(process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "");
+  return base
+    ? `${base}/?caseId=${encodeURIComponent(caseId)}`
+    : tr(APP_DEFAULT_LANG, "server.email.common.caseIdFallback", { caseId });
+}
+
 // ---------- 報案人申請刪除（5B-2）----------
 // 報案人冇刪除權；只會將狀態改做 pending_deletion，再寄信通知 admin
 app.post("/api/cases/:caseId/delete-request", caseActionRateLimitMiddleware, async (req: Request, res: Response) => {
@@ -2000,22 +2033,17 @@ app.post("/api/cases/:caseId/delete-request", caseActionRateLimitMiddleware, asy
       if (to.length === 0) {
         console.warn(`[DeleteRequest] 搵唔到 admin 電郵，案件 ${caseId} 冇寄通知`);
       } else {
-        const base = String(process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "");
-        const link = base ? `${base}/?caseId=${encodeURIComponent(caseId)}` : `（案件編號：${caseId}）`;
-        const text = [
-          "報案人申請刪除案件，請登入管理員帳戶處理。",
-          "",
-          `案件編號：${caseId}`,
-          `標題：${outcome.title}`,
-          `原因：${DELETE_REASON_ZH[reason] ?? reason}`,
-          `補充說明：${note || "（冇）"}`,
-          `申請人：${authInfo.email || authInfo.uid}`,
-          `申請時間：${requestedAt}`,
-          "",
-          "打開以下連結，喺案件詳情揀「確認刪除」或者「還原案件」：",
-          link,
-        ].join("\n");
-        await sendMail(to.join(", "), `[PawPulse] 刪除申請：${caseId}`, text);
+        const L = APP_DEFAULT_LANG;
+        const text = tr(L, "server.email.deleteRequest.body", {
+          caseId,
+          title: outcome.title,
+          reason: trOr(L, `server.labels.deleteReason.${reason}`, reason),
+          note: note || tr(L, "server.email.common.none"),
+          requester: authInfo.email || authInfo.uid,
+          time: requestedAt,
+          link: adminCaseLink(caseId),
+        });
+        await sendMail(to.join(", "), tr(L, "server.email.deleteRequest.subject", { caseId }), text);
       }
     } catch (err) {
       console.error("[DeleteRequest] email failed:", (err as Error).message);
@@ -2029,24 +2057,7 @@ app.post("/api/cases/:caseId/delete-request", caseActionRateLimitMiddleware, asy
   }
 });
 
-// ---------- 5E：通知報案人 ----------
-const STATUS_LABEL: Record<string, { zh: string; en: string }> = {
-  pending: { zh: "待處理", en: "Pending" },
-  in_progress: { zh: "處理中", en: "In progress" },
-  rescued: { zh: "已救援", en: "Rescued" },
-  closed: { zh: "已結案", en: "Closed" },
-};
-
-// 報案人電郵：先用報案時填嘅聯絡電郵，冇就用登入帳戶電郵
-async function getReporterEmail(caseId: string): Promise<string | null> {
-  const snap = await getAdminDb().collection("case").doc(caseId).collection("private").doc("contact").get();
-  const d = snap.data() ?? {};
-  for (const v of [d.reporterEmail, d.accountEmail]) {
-    const e = cleanStr(v, 254).toLowerCase();
-    if (EMAIL_RE.test(e)) return e;
-  }
-  return null;
-}
+// ---------- 5E：留言通知報案人 ----------
 
 // 報案人帳戶：登入咗報案嘅 uid + 已連結呢宗案件嘅帳戶
 async function getReporterUids(caseId: string): Promise<string[]> {
@@ -2092,32 +2103,11 @@ async function notifyReporterOfComment(caseId: string, commenterUid: string, aut
   }
 }
 
-// 狀態改變：寄 email 俾報案人；失敗唔影響更新結果
-async function emailReporterStatus(req: Request, caseId: string, status: string, title: string, ngoName?: string) {
-  try {
-    const to = await getReporterEmail(caseId);
-    if (!to) return;
-    const zh = isZh(resolveLang(req, req.body?.lang));
-    const label = STATUS_LABEL[status] ?? { zh: status, en: status };
-    const trackingUrl = `${getPublicBaseUrl(req)}/?caseId=${encodeURIComponent(caseId)}`;
-    const subject = zh
-      ? `PawPulse：你通報的案件 ${caseId} 狀態已更新為「${label.zh}」`
-      : `PawPulse: Your report ${caseId} is now "${label.en}"`;
-    const text = zh
-      ? `你好，\n\n你通報的案件狀態已更新。\n\n案件編號：${caseId}\n標題：${title}\n最新狀態：${label.zh}${ngoName ? `\n負責機構：${ngoName}` : ""}\n\n查看最新進度：\n${trackingUrl}\n\nPawPulse`
-      : `Hello,\n\nThe status of your report has been updated.\n\nCase ID: ${caseId}\nTitle: ${title}\nNew status: ${label.en}${ngoName ? `\nOrganisation: ${ngoName}` : ""}\n\nFollow the latest progress:\n${trackingUrl}\n\nPawPulse`;
-    await sendMail(to, subject, text);
-  } catch (err) {
-    console.warn("[Notify] status email failed:", (err as Error).message);
-  }
-}
-
-
 // ---------- 5D：案件留言 ----------
 // 留言只可以經 server 寫（rules 禁止 client 寫），身份同內容全部由 server 檢查
 const COMMENT_MAX_LEN = 1000;
 const COMMENT_ID_RE = /^[A-Za-z0-9]{1,40}$/;
-const commentRateLimitMiddleware = makeRateLimit("comment", 10, 60, "留言過於頻繁，請稍後再試");
+const commentRateLimitMiddleware = makeRateLimit("comment", 10, 60, "rateComment");
 
 // 保留換行，刪走其他控制字元；連續多過 2 個空行縮返做 2 個
 function cleanCommentText(v: unknown): string {
@@ -2150,30 +2140,30 @@ app.post("/api/cases/:caseId/comments", commentRateLimitMiddleware, async (req: 
   try {
     const caseId = String(req.params.caseId || "");
     if (!CASE_ID_RE.test(caseId)) {
-      res.status(400).json({ error: "案件編號不正確", code: "not_found" });
+      res.status(400).json({ error: errMsg(req, "badCaseId"), code: "not_found" });
       return;
     }
 
     const authInfo = await getAuthInfo(req);
     if (!authInfo) {
-      res.status(401).json({ error: "請先登入", code: "login_required" });
+      res.status(401).json({ error: errMsg(req, "loginRequired"), code: "login_required" });
       return;
     }
 
     const text = cleanCommentText(req.body?.text);
     if (!text) {
-      res.status(400).json({ error: "留言不可以空白", code: "empty" });
+      res.status(400).json({ error: errMsg(req, "commentEmpty"), code: "empty" });
       return;
     }
     if (text.length > COMMENT_MAX_LEN) {
-      res.status(400).json({ error: "留言太長", code: "too_long" });
+      res.status(400).json({ error: errMsg(req, "commentTooLong"), code: "too_long" });
       return;
     }
 
     const rawParent = req.body?.parentId;
     const parentId = rawParent === undefined || rawParent === null || rawParent === "" ? null : String(rawParent);
     if (parentId !== null && !COMMENT_ID_RE.test(parentId)) {
-      res.status(400).json({ error: "回覆的留言不存在", code: "bad_parent" });
+      res.status(400).json({ error: errMsg(req, "badParent"), code: "bad_parent" });
       return;
     }
 
@@ -2181,11 +2171,11 @@ app.post("/api/cases/:caseId/comments", commentRateLimitMiddleware, async (req: 
     const caseRef = db.collection("case").doc(caseId);
     const caseSnap = await caseRef.get();
     if (!caseSnap.exists) {
-      res.status(404).json({ error: "找不到案件", code: "not_found" });
+      res.status(404).json({ error: errMsg(req, "caseNotFound"), code: "not_found" });
       return;
     }
     if (caseSnap.data()?.status === "pending_deletion" && authInfo.role !== "admin") {
-      res.status(409).json({ error: "此案件正等待管理員處理刪除申請", code: "pending_deletion" });
+      res.status(409).json({ error: errMsg(req, "pendingDeletion"), code: "pending_deletion" });
       return;
     }
 
@@ -2194,13 +2184,13 @@ app.post("/api/cases/:caseId/comments", commentRateLimitMiddleware, async (req: 
     if (authInfo.role === "user") {
       const authUser = await getAdminAuth().getUser(authInfo.uid);
       if (!authUser.emailVerified) {
-        res.status(403).json({ error: "請先完成電郵驗證", code: "email_unverified" });
+        res.status(403).json({ error: errMsg(req, "emailUnverified"), code: "email_unverified" });
         return;
       }
       const profileSnap = await db.collection("userprofiles").doc(authInfo.uid).get();
       const username = profileSnap.exists ? profileSnap.data()?.username : null;
       if (typeof username !== "string" || !username) {
-        res.status(403).json({ error: "請先完成會員資料", code: "profile_required" });
+        res.status(403).json({ error: errMsg(req, "profileRequired"), code: "profile_required" });
         return;
       }
       authorName = username;
@@ -2214,7 +2204,7 @@ app.post("/api/cases/:caseId/comments", commentRateLimitMiddleware, async (req: 
     if (parentId) {
       const parentSnap = await caseRef.collection("comments").doc(parentId).get();
       if (!parentSnap.exists || parentSnap.data()?.parentId) {
-        res.status(400).json({ error: "回覆的留言不存在", code: "bad_parent" });
+        res.status(400).json({ error: errMsg(req, "badParent"), code: "bad_parent" });
         return;
       }
     }
@@ -2245,13 +2235,13 @@ app.post("/api/cases/:caseId/comments", commentRateLimitMiddleware, async (req: 
     await notifyReporterOfComment(
       caseId,
       authInfo.uid,
-      authorName ?? (authInfo.role === "admin" ? "PawPulse 管理員" : ""),
+      authorName ?? (authInfo.role === "admin" ? tr(APP_DEFAULT_LANG, "server.misc.adminName") : ""),
       text
     );
     res.json({ success: true, id: ref.id });
   } catch (err) {
     console.error("[Comments] post failed:", err);
-    res.status(500).json({ error: "留言失敗", code: "unknown" });
+    res.status(500).json({ error: errMsg(req, "commentFailed"), code: "unknown" });
   }
 });
 
@@ -2260,25 +2250,25 @@ app.delete("/api/cases/:caseId/comments/:commentId", commentRateLimitMiddleware,
     const caseId = String(req.params.caseId || "");
     const commentId = String(req.params.commentId || "");
     if (!CASE_ID_RE.test(caseId) || !COMMENT_ID_RE.test(commentId)) {
-      res.status(400).json({ error: "找不到留言", code: "not_found" });
+      res.status(400).json({ error: errMsg(req, "commentNotFound"), code: "not_found" });
       return;
     }
 
     const authInfo = await getAuthInfo(req);
     if (!authInfo) {
-      res.status(401).json({ error: "請先登入", code: "login_required" });
+      res.status(401).json({ error: errMsg(req, "loginRequired"), code: "login_required" });
       return;
     }
 
     const ref = getAdminDb().collection("case").doc(caseId).collection("comments").doc(commentId);
     const snap = await ref.get();
     if (!snap.exists) {
-      res.status(404).json({ error: "找不到留言", code: "not_found" });
+      res.status(404).json({ error: errMsg(req, "commentNotFound"), code: "not_found" });
       return;
     }
     const data = snap.data() || {};
     if (data.uid !== authInfo.uid && authInfo.role !== "admin") {
-      res.status(403).json({ error: "無權刪除此留言", code: "forbidden" });
+      res.status(403).json({ error: errMsg(req, "commentForbidden"), code: "forbidden" });
       return;
     }
     if (data.deleted) {
@@ -2296,7 +2286,7 @@ app.delete("/api/cases/:caseId/comments/:commentId", commentRateLimitMiddleware,
     res.json({ success: true });
   } catch (err) {
     console.error("[Comments] delete failed:", err);
-    res.status(500).json({ error: "刪除留言失敗", code: "unknown" });
+    res.status(500).json({ error: errMsg(req, "commentDeleteFailed"), code: "unknown" });
   }
 });
 
@@ -2324,7 +2314,6 @@ app.post("/api/cases/:caseId/read", caseActionRateLimitMiddleware, async (req: R
   }
 });
 
-
 // ---------- admin 還原待刪除案件 ----------
 app.post("/api/admin/cases/:caseId/restore", adminRateLimitMiddleware, async (req: Request, res: Response) => {
   const caseId = String(req.params.caseId ?? "");
@@ -2334,7 +2323,7 @@ app.post("/api/admin/cases/:caseId/restore", adminRateLimitMiddleware, async (re
   }
   const authInfo = await getAuthInfo(req);
   if (authInfo?.role !== "admin") {
-    res.status(403).json({ error: "只有管理員可以還原案件", code: "forbidden" });
+    res.status(403).json({ error: errMsg(req, "restoreAdminOnly"), code: "forbidden" });
     return;
   }
   try {
@@ -2418,30 +2407,24 @@ app.post("/api/cases/:caseId/contact-admin", emailIpRateLimitMiddleware, async (
       if (to.length === 0) {
         console.warn(`[ContactAdmin] 搵唔到 admin 電郵，訊息 ${ref.id} 冇寄通知`);
       } else {
-        const base = String(process.env.PUBLIC_BASE_URL ?? "").replace(/\/+$/, "");
-        const link = base ? `${base}/?caseId=${encodeURIComponent(caseId)}` : `（案件編號：${caseId}）`;
-        const text = [
-          "報案人透過「聯絡管理員」發出訊息。",
-          "",
-          `類別：${CONTACT_CATEGORY_ZH[category] ?? category}`,
-          `案件編號：${caseId}`,
-          `標題：${String(d.title ?? "")}`,
-          `目前狀態：${String(d.status ?? "")}`,
-          `接手機構：${d.acceptedBy?.ngoName ? String(d.acceptedBy.ngoName) : "（未有）"}`,
-          `報案人電郵：${authInfo.email || "（冇電郵）"}（可以直接寄信回覆）`,
-          `時間：${sentAt}`,
-          `訊息編號：${ref.id}`,
-          "",
-          "內容：",
+        const L = APP_DEFAULT_LANG;
+        const categoryLabel = trOr(L, `server.labels.contactCategory.${category}`, category);
+        const text = tr(L, "server.email.contactAdmin.body", {
+          category: categoryLabel,
+          caseId,
+          title: String(d.title ?? ""),
+          status: d.status ? statusLabel(L, String(d.status)) : "",
+          ngo: d.acceptedBy?.ngoName ? String(d.acceptedBy.ngoName) : tr(L, "server.email.common.notYet"),
+          email: authInfo.email || tr(L, "server.email.common.noEmail"),
+          time: sentAt,
+          messageId: ref.id,
           message,
-          "",
-          "案件連結：",
-          link,
-        ].join("\n");
-                const replyTo = authInfo.email && EMAIL_RE.test(authInfo.email) ? authInfo.email : undefined;
+          link: adminCaseLink(caseId),
+        });
+        const replyTo = authInfo.email && EMAIL_RE.test(authInfo.email) ? authInfo.email : undefined;
         await sendMail(
           to.join(", "),
-          `[PawPulse] 聯絡管理員（${CONTACT_CATEGORY_ZH[category] ?? category}）：${caseId}`,
+          tr(L, "server.email.contactAdmin.subject", { category: categoryLabel, caseId }),
           text,
           { replyTo }
         );
@@ -2463,7 +2446,7 @@ app.post("/api/cases/:caseId/contact-admin", emailIpRateLimitMiddleware, async (
 app.delete("/api/admin/cases/:caseId", adminRateLimitMiddleware, async (req: Request, res: Response) => {
   const caseId = String(req.params.caseId ?? "");
   if (!CASE_ID_RE.test(caseId)) {
-    res.status(400).json({ error: "案件編號格式不正確" });
+    res.status(400).json({ error: errMsg(req, "badCaseId") });
     return;
   }
 
@@ -2489,15 +2472,14 @@ app.delete("/api/admin/cases/:caseId", adminRateLimitMiddleware, async (req: Req
       await bucket.deleteFiles({ prefix: `animal-reports/${caseId}/` });
     }
 
-    console.log(`[Admin] Deleted case ${caseId} (contact + photos) by ${authInfo.uid}`);
     // 連留言一齊刪（子集合唔會跟住案件文件自動刪走）
-    await getAdminDb().recursiveDelete(
-      getAdminDb().collection("case").doc(caseId).collection("comments"),
-    );
+    await db.recursiveDelete(caseRef.collection("comments"));
+
+    console.log(`[Admin] Deleted case ${caseId} (contact + photos + comments) by ${authInfo.uid}`);
     res.json({ success: true });
   } catch (err) {
     console.error("[Admin delete] error:", (err as Error).message);
-    res.status(500).json({ error: "刪除失敗" });
+    res.status(500).json({ error: errMsg(req, "deleteFailed") });
   }
 });
 
@@ -2505,8 +2487,8 @@ app.delete("/api/admin/cases/:caseId", adminRateLimitMiddleware, async (req: Req
 
 async function startServer() {
   // 未定義嘅 API 路徑一律回 JSON 404，唔好交俾前端 SPA 回傳 HTML
-  app.use("/api", (_req: Request, res: Response) => {
-    res.status(404).json({ error: "API 路徑不存在" });
+  app.use("/api", (req: Request, res: Response) => {
+    res.status(404).json({ error: errMsg(req, "apiNotFound") });
   });
 
   if (!IS_PROD) {

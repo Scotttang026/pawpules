@@ -17,6 +17,152 @@
     "myCases": "My Cases",
     "ngoWorkspace": "NGO Desk"
   },
+  "server": {
+    "errors": {
+      "rateAi": "Too many requests. Please wait 1 minute and try again.",
+      "rateUpload": "Too many uploads. Please try again later.",
+      "rateGeocode": "Too many address lookups. Please try again later.",
+      "ratePlaces": "Too many searches. Please try again later.",
+      "rateEmail": "Too many emails sent. Please try again later.",
+      "rateDispatch": "Too many dispatch requests. Please try again later.",
+      "rateAction": "Too many actions. Please try again later.",
+      "rateComment": "Too many comments. Please try again later.",
+      "apiNotFound": "API route not found",
+      "missingAddress": "Please enter an address",
+      "geocodeNotConfigured": "Address lookup is not configured",
+      "geocodeFailed": "Address lookup failed",
+      "addressNotFound": "Address not found",
+      "badLatLng": "Missing or invalid coordinates",
+      "placesNotConfigured": "Address search is not configured",
+      "placesUnavailable": "Address search is temporarily unavailable",
+      "badPlace": "Invalid place",
+      "placeDetailsFailed": "Could not load place details",
+      "placeNoCoords": "This place has no coordinates",
+      "badCaseId": "Invalid case ID",
+      "badPhotoIndex": "Invalid photo number",
+      "missingImage": "Missing photo data",
+      "badImageData": "Invalid image data",
+      "imageTooLarge": "The image is too large. Please compress it and try again.",
+      "jpegOnly": "Only JPEG photos are accepted",
+      "storageNotConfigured": "Photo storage is not configured",
+      "photoExists": "This photo already exists for the case",
+      "photoSaveFailed": "Failed to save photo",
+      "caseNotFound": "Case not found",
+      "analyzeUnavailable": "This case has already been analysed or the analysis window has passed",
+      "casePhotosNotFound": "Case photos not found",
+      "analyzeFailed": "AI analysis failed",
+      "confirmTooLate": "Confirmation emails can only be sent within 15 minutes of reporting",
+      "noValidEmail": "This case has no valid email address",
+      "confirmAlreadySent": "Confirmation email already sent",
+      "confirmFailed": "Failed to send confirmation email",
+      "badDispatchInput": "Missing or invalid case ID / organisation ID",
+      "caseOrNgoNotFound": "Case or organisation not found",
+      "dispatchAdminOnly": "Only administrators can dispatch this case",
+      "alreadyDispatched": "A rescue organisation has already been notified for this case",
+      "dispatchFailed": "Failed to notify the NGO",
+      "adminOnly": "Only administrators can perform this action",
+      "loginRequired": "Please sign in first",
+      "nameRequired": "Please enter your first and last name",
+      "usernameInvalid": "Invalid username",
+      "profileSaveFailed": "Failed to save profile",
+      "badLoginEmail": "Invalid login email",
+      "badNgoId": "Invalid organisation ID",
+      "ngoNotFound": "Organisation not found",
+      "emailIsAdmin": "This email belongs to an administrator and cannot be an NGO account",
+      "emailOtherNgo": "This email already belongs to another organisation",
+      "ngoAccountLimit": "Each organisation can have at most {{max}} login accounts",
+      "ngoAccountCreateFailed": "Failed to create NGO account",
+      "badUid": "Invalid account ID",
+      "ngoAccountNotFound": "NGO account not found",
+      "ngoAccountDeleteFailed": "Failed to remove NGO account",
+      "ngoDeleteFailed": "Failed to delete organisation",
+      "ngoOnly": "Only NGO accounts can accept cases",
+      "ownNgoNotFound": "Your organisation could not be found",
+      "pendingDeletion": "This case is awaiting an administrator's decision on a deletion request",
+      "alreadyAcceptedMine": "Your organisation has already accepted this case",
+      "alreadyAcceptedOther": "This case has already been accepted by another organisation",
+      "caseFinished": "This case has been closed",
+      "acceptFailed": "Failed to accept case",
+      "badStatus": "Invalid case status",
+      "noPermission": "You do not have permission to update this case",
+      "ngoNoPending": "NGOs cannot set a case back to pending",
+      "notAcceptingNgo": "Only the organisation handling this case can update its progress",
+      "statusUpdateFailed": "Failed to update case status",
+      "commentEmpty": "Comment cannot be empty",
+      "commentTooLong": "Comment is too long",
+      "badParent": "The comment you are replying to does not exist",
+      "emailUnverified": "Please verify your email first",
+      "profileRequired": "Please complete your member profile first",
+      "commentFailed": "Failed to post comment",
+      "commentNotFound": "Comment not found",
+      "commentForbidden": "You cannot delete this comment",
+      "commentDeleteFailed": "Failed to delete comment",
+      "restoreAdminOnly": "Only administrators can restore cases",
+      "deleteFailed": "Failed to delete"
+    },
+    "labels": {
+      "deleteReason": {
+        "duplicate": "Duplicate report",
+        "resolved": "Animal rescued / left the scene",
+        "wrong_info": "Incorrect information",
+        "privacy": "Photos or content involve privacy",
+        "mistake": "False report",
+        "other": "Other"
+      },
+      "contactCategory": {
+        "update": "Update case details",
+        "delete": "Delete case",
+        "photo": "Photo issue",
+        "status": "Rescue progress enquiry",
+        "other": "Other"
+      }
+    },
+    "misc": {
+      "adminName": "PawPulse Admin",
+      "coordAddress": "Coordinates ({{lat}}, {{lng}})",
+      "dispatchSimulated": "Test mode: the case has not actually been sent to the NGO system."
+    },
+    "email": {
+      "common": {
+        "none": "(none)",
+        "notYet": "(not yet)",
+        "noEmail": "(no email)",
+        "caseIdFallback": "(Case ID: {{caseId}})"
+      },
+      "confirm": {
+        "subject": "PawPulse: We received your report ({{caseId}})",
+        "body": "Hello,\n\nThank you for reporting a stray animal. Case ID: {{caseId}}\n\nYou can follow the latest progress here:\n{{trackingUrl}}{{accountPart}}\n\nIf the animal is in critical condition, please also call your local animal rescue hotline.\n\nPawPulse",
+        "accountSetup": "\n\nWant to see all your reports in one place? We've created an account for this email. Set a password with this link, then sign in to \"My cases\":\n{{link}}",
+        "accountLogin": "\n\nYou can also sign in to PawPulse with this email and check \"My cases\":\n{{baseUrl}}"
+      },
+      "ngoAccount": {
+        "subject": "PawPulse: Set up your NGO account password",
+        "body": "Hello,\n\nA PawPulse administrator has added you as an NGO account for \"{{ngoName}}\" (login email: {{email}}).\n\nPlease set your password using this link:\n{{link}}\n\nAfterwards, sign in with this email and password at:\n{{baseUrl}}\n\nIf you did not expect this email, you can ignore it.\n\nPawPulse"
+      },
+      "accepted": {
+        "subject": "PawPulse: A rescue organisation has accepted case {{caseId}}",
+        "body": "Hello,\n\nYour report ({{caseId}}) has been accepted by the following rescue organisation:\n\n{{info}}\n\nFollow the latest progress:\n{{trackingUrl}}\n\nPawPulse",
+        "org": "Organisation: {{v}}",
+        "phone": "Phone: {{v}}",
+        "whatsapp": "WhatsApp: {{v}}",
+        "email": "Email: {{v}}",
+        "website": "Website: {{v}}"
+      },
+      "status": {
+        "subject": "PawPulse: Your report {{caseId}} is now \"{{status}}\"",
+        "body": "Hello,\n\nThe status of your report has been updated.\n\nCase ID: {{caseId}}\nTitle: {{title}}\nNew status: {{status}}{{ngoLine}}\n\nFollow the latest progress:\n{{trackingUrl}}\n\nPawPulse",
+        "ngoLine": "\nOrganisation: {{ngo}}"
+      },
+      "deleteRequest": {
+        "subject": "[PawPulse] Deletion request: {{caseId}}",
+        "body": "A reporter has requested deletion of a case. Please sign in with an administrator account to handle it.\n\nCase ID: {{caseId}}\nTitle: {{title}}\nReason: {{reason}}\nNote: {{note}}\nRequested by: {{requester}}\nRequested at: {{time}}\n\nOpen the link below and choose \"Confirm deletion\" or \"Restore case\" in the case details:\n{{link}}"
+      },
+      "contactAdmin": {
+        "subject": "[PawPulse] Contact admin ({{category}}): {{caseId}}",
+        "body": "A reporter sent a message via \"Contact admin\".\n\nCategory: {{category}}\nCase ID: {{caseId}}\nTitle: {{title}}\nCurrent status: {{status}}\nHandling organisation: {{ngo}}\nReporter email: {{email}} (reply directly to contact the reporter)\nTime: {{time}}\nMessage ID: {{messageId}}\n\nMessage:\n{{message}}\n\nCase link:\n{{link}}"
+      }
+    }
+  },
   "caseTag": {
     "stray": "Stray",
     "injured": "Injured",

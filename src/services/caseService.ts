@@ -12,6 +12,7 @@ import { calculateDistanceKm } from '../utils/location';
 import { monitoring } from '../utils/monitoring';
 import { isCaseTag } from '../utils/caseLabels';
 import { apiFetch } from './api';
+import { getAppLang } from '../i18n';
 
 export const CASE_COLLECTION = 'case';
 export const NGO_COLLECTION = 'ngodatail';
@@ -149,7 +150,11 @@ export async function createCaseInFirestore(report: StrayReport): Promise<void> 
     };
 
     // 全部 `|| ''`：Firestore 唔接受 undefined，會令成個 batch 失敗
-    const contactPayload: ReporterContactInfo & { createdAt: unknown } = {
+        const contactPayload: ReporterContactInfo & {
+      createdAt: unknown;
+      accountEmail?: string;
+      lang?: string;
+      } = {
       reporterName: report.reporterName || '',
       reporterPhone: report.reporterPhone || '',
       reporterEmail: report.reporterEmail || '',
@@ -158,7 +163,8 @@ export async function createCaseInFirestore(report: StrayReport): Promise<void> 
       ...(auth.currentUser?.email && report.createdByUid === auth.currentUser.uid
         ? { accountEmail: auth.currentUser.email }
         : {}),
-
+      // 報案人介面語言：之後 NGO 接手、改狀態寄嘅信都會用呢個語言
+      lang: getAppLang(),
       createdAt: serverTimestamp(),
     };
 
@@ -572,10 +578,8 @@ export function subscribeToMyUnread(uid: string, cb: (m: Record<string, CaseUnre
 
 /** 打開案件後清走未讀；失敗唔使理 */
 export async function markCaseRead(caseId: string): Promise<void> {
-  const token = await auth.currentUser?.getIdToken();
-  if (!token) return;
-  await fetch(`/api/cases/${encodeURIComponent(caseId)}/read`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-  }).catch(() => undefined);
+  if (!auth.currentUser) return;
+  await apiFetch(`/api/cases/${encodeURIComponent(caseId)}/read`, { method: 'POST' })
+    .catch(() => undefined);
 }
+

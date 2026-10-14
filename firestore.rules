@@ -130,19 +130,19 @@ service cloud.firestore {
     }
 
     // 報案人聯絡資料：createdByUid 必須等於真正登入者，唔可以冒認
-      function isValidContact(data) {
-        return data.keys().hasAll(['reporterName', 'reporterPhone', 'reporterEmail', 'createdByUid', 'createdAt'])
-          && data.keys().hasOnly(['reporterName', 'reporterPhone', 'reporterEmail', 'createdByUid', 'createdAt', 'accountEmail'])
-          && data.reporterName is string && data.reporterName.size() <= 100
-          && data.reporterPhone is string && data.reporterPhone.size() <= 50
-          && data.reporterEmail is string && data.reporterEmail.size() <= 200
-          && data.createdAt == request.time
-          && ((request.auth == null && data.createdByUid == 'anonymous')
-              || (request.auth != null && data.createdByUid == request.auth.uid))
-          // 登入帳戶 email：可選；有就必須同 token 一致，匿名唔准填
-          && (!('accountEmail' in data)
-              || (request.auth != null && data.accountEmail == request.auth.token.get('email', '')));
-      }
+    function isValidContact(data) {
+      return data.keys().hasAll(['reporterName', 'reporterPhone', 'reporterEmail', 'createdByUid', 'createdAt'])
+        && data.keys().hasOnly(['reporterName', 'reporterPhone', 'reporterEmail', 'createdByUid', 'createdAt', 'accountEmail', 'lang'])
+        && data.reporterName is string && data.reporterName.size() <= 100
+        && data.reporterPhone is string && data.reporterPhone.size() <= 50
+        && data.reporterEmail is string && data.reporterEmail.size() <= 200
+        && data.createdAt == request.time
+        && ((request.auth == null && data.createdByUid == 'anonymous')
+            || (request.auth != null && data.createdByUid == request.auth.uid))
+        && (!('accountEmail' in data)
+            || (request.auth != null && data.accountEmail == request.auth.token.get('email', '')))
+        && (!('lang' in data) || (data.lang is string && data.lang.size() <= 10));
+    }
 
     match /case/{caseId} {
       // 「待刪除」案件只有 admin 同 NGO 睇到
