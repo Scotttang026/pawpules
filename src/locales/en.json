@@ -280,7 +280,7 @@
     },
     "errors": {
       "noPhoto": "Please upload or take a photo of the animal first",
-      "noDescription": "Please describe the animal’s situation",
+      "noDescription": "Please choose at least one tag or describe the situation.",
       "noLocation": "Please confirm the location first: tap “Use GPS”, or pick a suggested address.",
       "badPhone": "Invalid phone number. Use digits only, optionally with a country code, e.g. +852 9123 4567",
       "badCaptcha": "Incorrect verification code. Please try again.",

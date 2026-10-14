@@ -118,6 +118,8 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
 
   const busy = isSubmitting || isProcessingPhotos;
   const canAddMore = photos.length < MAX_CASE_PHOTOS;
+    // 揀咗標籤或者有打字，都算填咗現場狀況
+  const hasDescription = tags.length > 0 || !!stripTagLine(description).trim();
 
   const refreshCaptcha = () => {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -286,7 +288,8 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
     }
 
     // 只得標籤行唔算填咗現場狀況
-    if (!stripTagLine(description).trim()) {
+        // 揀標籤或者打字，兩樣有一樣就得
+    if (!hasDescription) {
       alert(t('reportForm.errors.noDescription'));
       return;
     }
@@ -416,8 +419,8 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
     {
       id: 'description',
       label: t('reportForm.checklist.description'),
-      value: stripTagLine(description).trim() ? t('reportForm.checklist.filled') : t('reportForm.checklist.notFilled'),
-      done: !!stripTagLine(description).trim(),
+      value: hasDescription ? t('reportForm.checklist.filled') : t('reportForm.checklist.notFilled'),
+      done: hasDescription,
     },
     {
       id: 'email',
@@ -693,14 +696,6 @@ export const ReportForm: React.FC<ReportFormProps> = ({ ngos, onSubmitReport, on
                 })}
               </div>
             </div>
-            <textarea
-              rows={4}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={t('reportForm.description.placeholder')}
-              className={`${inputClass} resize-y`}
-              required
-            />
           </FormSection>
 
           <FormSection
