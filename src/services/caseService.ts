@@ -558,3 +558,24 @@ export function rankFirestoreNGOs(
   });
   return scored.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
 }
+
+export type CaseUnread = { count: number; lastBy?: string; preview?: string };
+
+/** 我的案件：即時收未讀留言（key = caseId） */
+export function subscribeToMyUnread(uid: string, cb: (m: Record<string, CaseUnread>) => void) {
+  return onSnapshot(
+    doc(db, 'usercases', uid),
+    (snap) => cb((snap.data()?.unread ?? {}) as Record<string, CaseUnread>),
+    () => cb({})
+  );
+}
+
+/** 打開案件後清走未讀；失敗唔使理 */
+export async function markCaseRead(caseId: string): Promise<void> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) return;
+  await fetch(`/api/cases/${encodeURIComponent(caseId)}/read`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => undefined);
+}

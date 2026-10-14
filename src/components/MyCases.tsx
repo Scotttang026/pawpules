@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ClipboardList, Clock, Building2, ChevronRight, Plus, Loader2, MapPin, AlertTriangle } from 'lucide-react';
+import { ClipboardList, Clock, Building2, ChevronRight, Plus, Loader2, MapPin, AlertTriangle, MessageCircle } from 'lucide-react';
 import type { StrayReport, CaseStatus } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import { subscribeToMyCaseIds } from '../services/caseService';
+import { subscribeToMyCaseIds, subscribeToMyUnread, markCaseRead, type CaseUnread } from '../services/caseService';
 import { statusLabel, urgencyLabel, animalLabel } from '../utils/caseLabels';
 import { getApiLang } from '../i18n';
 import EditCaseModal, { EditCaseAction } from './EditCaseModal';
@@ -64,6 +64,8 @@ export default function MyCases({ reports, onSelectReport, onNewReport }: MyCase
   const [editing, setEditing] = useState<StrayReport | null>(null);
   const [deleting, setDeleting] = useState<StrayReport | null>(null);
   const [contacting, setContacting] = useState<StrayReport | null>(null);
+  // 5E：未讀留言（key = caseId）
+  const [unread, setUnread] = useState<Record<string, CaseUnread>>({});
 
   useEffect(() => {
     setCaseIds(null);
@@ -79,6 +81,26 @@ export default function MyCases({ reports, onSelectReport, onNewReport }: MyCase
     );
     return unsubscribe;
   }, [uid]);
+
+  // 5E：即時收未讀（同一份 usercases 文件，Firestore 會共用連線，唔會多咗讀取費）
+  useEffect(() => {
+    setUnread({});
+    if (!uid) return;
+    return subscribeToMyUnread(uid, setUnread);
+  }, [uid]);
+
+  // 5E：打開案件 → 先喺畫面即刻收埋標籤，再叫 server 清走未讀
+  const openReport = (report: StrayReport) => {
+    if (unread[report.id]) {
+      setUnread((prev) => {
+        const next = { ...prev };
+        delete next[report.id];
+        return next;
+      });
+      void markCaseRead(report.id);
+    }
+    onSelectReport(report);
+  };
 
   // 用公開案件列表配對 ID；案件被刪咗（或者待刪除）就自動唔顯示
   const myReports = useMemo(() => {
@@ -188,20 +210,24 @@ export default function MyCases({ reports, onSelectReport, onNewReport }: MyCase
       <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {myReports.map((report) => {
           const accepted = report.acceptedBy;
+          const newInfo = unread[report.id];
+          const newCount = Number(newInfo?.count) || 0;
           return (
             <li key={report.id} className="min-w-0 space-y-1.5">
               <button
                 type="button"
-                onClick={() => onSelectReport(report)}
-                className="flex w-full min-w-0 gap-3 rounded-2xl border border-stone-200 bg-white p-3 text-left shadow-xs hover:border-brand-300 hover:shadow-sm transition cursor-pointer"
+                onClick={() => openReport(report)}
+                className={`flex w-full min-w-0 gap-3 rounded-2xl border bg-white p-3 text-left shadow-xs hover:border-brand-300 hover:shadow-sm transition cursor-pointer ${
+                  newCount > 0 ? 'border-rose-300' : 'border-stone-200'
+                }`}
               >
-                <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-stone-100">
+                <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-stone-100">
                   {report.photoUrl && (
                     <img
                       src={report.photoUrl}
                       alt=""
                       referrerPolicy="no-referrer"
-                      className={`w-12 h-12 rounded-lg object-cover ${isCoverSensitive(report) ? 'blur-md scale-110' : ''}`}
+                      className={`h-full w-full object-cover ${isCoverSensitive(report) ? 'blur-md scale-110' : ''}`}
                       onError={(e) => {
                         (e.currentTarget as HTMLImageElement).style.display = 'none';
                       }}
@@ -220,9 +246,24 @@ export default function MyCases({ reports, onSelectReport, onNewReport }: MyCase
                     <span className="text-[11px] text-stone-500">
                       {animalLabel(report.animalType, report.customAnimalName)}
                     </span>
+                    {/* 5E：新留言標籤 */}
+                    {newCount > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-bold text-white">
+                        <MessageCircle className="w-3 h-3" />
+                        {t('myCases.newComments', { count: newCount })}
+                      </span>
+                    )}
                   </div>
 
                   <p className="truncate text-sm font-bold text-stone-900">{report.title}</p>
+
+                  {/* 5E：最新一則留言預覽 */}
+                  {newCount > 0 && newInfo?.preview && (
+                    <p className="truncate rounded-lg bg-rose-50 px-2 py-1 text-xs text-rose-800">
+                      {newInfo.lastBy ? `${newInfo.lastBy}：` : ''}
+                      {newInfo.preview}
+                    </p>
+                  )}
 
                   {report.location?.address && (
                     <p className="flex items-center gap-1 truncate text-xs text-stone-500">

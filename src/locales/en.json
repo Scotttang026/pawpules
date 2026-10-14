@@ -473,7 +473,8 @@
     "acceptedBy": "Handled by {{ngo}}",
     "reportedAt": "Reported: {{time}}",
     "viewDetails": "View details",
-    "newReport": "New report"
+    "newReport": "New report",
+    "newComments": "{{count}} new comment(s)"
   },
   "adminDashboard": {
     "viewDetails": "View case details"

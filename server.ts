@@ -1601,8 +1601,7 @@ app.post("/api/cases/:caseId/accept", caseActionRateLimitMiddleware, async (req:
     let emailSent = false;
     let simulated = false;
     try {
-      const contactSnap = await caseRef.collection("private").doc("contact").get();
-      const reporterEmail = cleanStr(contactSnap.data()?.reporterEmail, 254);
+      const reporterEmail = (await getReporterEmail(caseId)) ?? "";
       if (EMAIL_RE.test(reporterEmail)) {
         const lang = resolveLang(req, req.body?.lang);
         const zh = isZh(lang);
@@ -1683,21 +1682,29 @@ app.post("/api/cases/:caseId/status", caseActionRateLimitMiddleware, async (req:
     const caseRef = getAdminDb().collection("case").doc(caseId);
     const outcome = await getAdminDb().runTransaction(async (tx) => {
       const snap = await tx.get(caseRef);
-      if (!snap.exists) return 404;
+      if (!snap.exists) return { code: 404 as const };
       const d = snap.data() ?? {};
-      if (authInfo.role === "ngo" && d.acceptedBy?.ngoId !== authInfo.ngoId) return 403;
+      if (authInfo.role === "ngo" && d.acceptedBy?.ngoId !== authInfo.ngoId) return { code: 403 as const };
       tx.update(caseRef, { status, updatedAt: FieldValue.serverTimestamp() });
-      return 200;
+      return {
+        code: 200 as const,
+        changed: d.status !== status,
+        title: String(d.title ?? ""),
+        ngoName: d.acceptedBy?.ngoName ? String(d.acceptedBy.ngoName) : undefined,
+      };
     });
 
-    if (outcome === 404) {
+    if (outcome.code === 404) {
       res.status(404).json({ error: "找不到案件" });
       return;
     }
-    if (outcome === 403) {
+    if (outcome.code === 403) {
       res.status(403).json({ error: "只有接手此案件嘅機構可以更新進度" });
       return;
     }
+
+    // 狀態真係變咗先寄信（重複撳同一個狀態唔會寄）
+    if (outcome.changed) await emailReporterStatus(req, caseId, status, outcome.title, outcome.ngoName);
 
     console.log(`[Status] case ${caseId} → ${status} by ${authInfo.role} ${authInfo.uid}`);
     res.json({ success: true, status });
@@ -1706,6 +1713,7 @@ app.post("/api/cases/:caseId/status", caseActionRateLimitMiddleware, async (req:
     res.status(500).json({ error: "更新案件狀態失敗" });
   }
 });
+
 
 // ---------- 報案人修改案件（5B-1）----------
 // 舊相全部保留；新相只可以放喺同一個資料夾嘅空位（0–4.jpg），總數最多 5 張
@@ -2021,6 +2029,90 @@ app.post("/api/cases/:caseId/delete-request", caseActionRateLimitMiddleware, asy
   }
 });
 
+// ---------- 5E：通知報案人 ----------
+const STATUS_LABEL: Record<string, { zh: string; en: string }> = {
+  pending: { zh: "待處理", en: "Pending" },
+  in_progress: { zh: "處理中", en: "In progress" },
+  rescued: { zh: "已救援", en: "Rescued" },
+  closed: { zh: "已結案", en: "Closed" },
+};
+
+// 報案人電郵：先用報案時填嘅聯絡電郵，冇就用登入帳戶電郵
+async function getReporterEmail(caseId: string): Promise<string | null> {
+  const snap = await getAdminDb().collection("case").doc(caseId).collection("private").doc("contact").get();
+  const d = snap.data() ?? {};
+  for (const v of [d.reporterEmail, d.accountEmail]) {
+    const e = cleanStr(v, 254).toLowerCase();
+    if (EMAIL_RE.test(e)) return e;
+  }
+  return null;
+}
+
+// 報案人帳戶：登入咗報案嘅 uid + 已連結呢宗案件嘅帳戶
+async function getReporterUids(caseId: string): Promise<string[]> {
+  const db = getAdminDb();
+  const [contact, linked] = await Promise.all([
+    db.collection("case").doc(caseId).collection("private").doc("contact").get(),
+    db.collection("usercases").where("caseIds", "array-contains", caseId).limit(10).get(),
+  ]);
+  const ids = new Set(linked.docs.map((d) => d.id));
+  const c = contact.data()?.createdByUid;
+  if (typeof c === "string" && c !== "anonymous" && UID_RE.test(c)) ids.add(c);
+  return [...ids];
+}
+
+// 有人留言：喺報案人嘅 usercases 加未讀（自己留言唔通知自己）；失敗唔影響留言
+async function notifyReporterOfComment(caseId: string, commenterUid: string, authorName: string, text: string) {
+  try {
+    const uids = (await getReporterUids(caseId)).filter((u) => u !== commenterUid);
+    if (uids.length === 0) return;
+    const db = getAdminDb();
+    const batch = db.batch();
+    for (const uid of uids) {
+      batch.set(
+        db.collection("usercases").doc(uid),
+        {
+          caseIds: FieldValue.arrayUnion(caseId),
+          unread: {
+            [caseId]: {
+              count: FieldValue.increment(1),
+              lastBy: authorName,
+              preview: text.slice(0, 80),
+              lastAt: FieldValue.serverTimestamp(),
+            },
+          },
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+    await batch.commit();
+  } catch (err) {
+    console.warn("[Notify] comment notify failed:", (err as Error).message);
+  }
+}
+
+// 狀態改變：寄 email 俾報案人；失敗唔影響更新結果
+async function emailReporterStatus(req: Request, caseId: string, status: string, title: string, ngoName?: string) {
+  try {
+    const to = await getReporterEmail(caseId);
+    if (!to) return;
+    const zh = isZh(resolveLang(req, req.body?.lang));
+    const label = STATUS_LABEL[status] ?? { zh: status, en: status };
+    const trackingUrl = `${getPublicBaseUrl(req)}/?caseId=${encodeURIComponent(caseId)}`;
+    const subject = zh
+      ? `PawPulse：你通報的案件 ${caseId} 狀態已更新為「${label.zh}」`
+      : `PawPulse: Your report ${caseId} is now "${label.en}"`;
+    const text = zh
+      ? `你好，\n\n你通報的案件狀態已更新。\n\n案件編號：${caseId}\n標題：${title}\n最新狀態：${label.zh}${ngoName ? `\n負責機構：${ngoName}` : ""}\n\n查看最新進度：\n${trackingUrl}\n\nPawPulse`
+      : `Hello,\n\nThe status of your report has been updated.\n\nCase ID: ${caseId}\nTitle: ${title}\nNew status: ${label.en}${ngoName ? `\nOrganisation: ${ngoName}` : ""}\n\nFollow the latest progress:\n${trackingUrl}\n\nPawPulse`;
+    await sendMail(to, subject, text);
+  } catch (err) {
+    console.warn("[Notify] status email failed:", (err as Error).message);
+  }
+}
+
+
 // ---------- 5D：案件留言 ----------
 // 留言只可以經 server 寫（rules 禁止 client 寫），身份同內容全部由 server 檢查
 const COMMENT_MAX_LEN = 1000;
@@ -2150,7 +2242,12 @@ app.post("/api/cases/:caseId/comments", commentRateLimitMiddleware, async (req: 
       deleted: false,
       createdAt: FieldValue.serverTimestamp(),
     });
-
+    await notifyReporterOfComment(
+      caseId,
+      authInfo.uid,
+      authorName ?? (authInfo.role === "admin" ? "PawPulse 管理員" : ""),
+      text
+    );
     res.json({ success: true, id: ref.id });
   } catch (err) {
     console.error("[Comments] post failed:", err);
@@ -2200,6 +2297,30 @@ app.delete("/api/cases/:caseId/comments/:commentId", commentRateLimitMiddleware,
   } catch (err) {
     console.error("[Comments] delete failed:", err);
     res.status(500).json({ error: "刪除留言失敗", code: "unknown" });
+  }
+});
+
+// ---------- 5E：報案人打開案件，清走未讀 ----------
+app.post("/api/cases/:caseId/read", caseActionRateLimitMiddleware, async (req: Request, res: Response) => {
+  const caseId = String(req.params.caseId ?? "");
+  if (!CASE_ID_RE.test(caseId)) {
+    res.status(400).json({ error: "bad_input", code: "bad_input" });
+    return;
+  }
+  const authInfo = await getAuthInfo(req);
+  if (!authInfo) {
+    res.status(401).json({ error: "unauthenticated", code: "unauthenticated" });
+    return;
+  }
+  try {
+    await getAdminDb().collection("usercases").doc(authInfo.uid).set(
+      { unread: { [caseId]: FieldValue.delete() } },
+      { merge: true }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[Read] error:", (err as Error).message);
+    res.status(500).json({ error: "save_failed", code: "save_failed" });
   }
 });
 

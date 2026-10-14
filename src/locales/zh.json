@@ -473,7 +473,8 @@
         "acceptedBy": "由 {{ngo}} 接手跟進",
         "reportedAt": "通報時間：{{time}}",
         "viewDetails": "查看詳情",
-        "newReport": "新增通報"
+        "newReport": "新增通報",
+        "newComments": "{{count}} 則新留言"
     },
     "adminDashboard": {
         "viewDetails": "查看個案詳情"
