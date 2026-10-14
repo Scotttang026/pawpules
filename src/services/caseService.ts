@@ -390,6 +390,7 @@ export interface CaseEditPayload {
   description: string;
   location: LocationCoords;
   newPhotoPaths: string[];
+  keepPaths?: string[]; // 保留嘅舊相（次序 = 顯示次序）；冇傳就全部保留
   lang: string;
 }
 

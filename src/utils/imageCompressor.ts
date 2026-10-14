@@ -1,7 +1,7 @@
 import i18n from 'i18next';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../firebase';
-import { MAX_CASE_PHOTOS } from './casePhotos';
+import { MAX_STORED_PHOTOS } from './casePhotos';
 
 const MAX_INPUT_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20MB，上傳前原始檔案上限
 const MAX_FIRESTORE_URL_LENGTH = 2048; // 對應 firestore.rules 嘅 photoUrl.size() <= 2048
@@ -148,7 +148,7 @@ export async function uploadAnimalPhoto(
   if (!blob || blob.size === 0) {
     throw new PhotoError('photo.empty');
   }
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(caseId) || !Number.isInteger(index) || index < 0 || index >= MAX_CASE_PHOTOS) {
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(caseId) || !Number.isInteger(index) || index < 0 || index >= MAX_STORED_PHOTOS) {
     throw new PhotoError('photo.badCaseId');
   }
   // 一宗案件一個資料夾，firestore.rules 會核對相片屬於呢宗案件

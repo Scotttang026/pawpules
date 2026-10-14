@@ -697,7 +697,9 @@
     "editCase": {
     "button": "Edit report",
     "title": "Edit report",
-    "hint": "You can edit a report once within 24 hours. Existing photos are kept and you can add new ones (up to 5 in total). The AI will re-analyse after you save.",
+    "hint": "You can remove original photos and upload new ones. Up to 5 photos are shown; the first is the cover. You cannot edit again after saving.",
+    "removedTitle": "Removed photos (tap to restore)",
+    "restorePhoto": "Restore photo",
     "oldPhoto": "Original",
     "newPhoto": "New",
     "addPhoto": "Add",
@@ -725,6 +727,7 @@
       "edit_used": "This report has already been edited",
       "bad_photos": "Photo data is invalid. Please choose the photos again",
       "bad_input": "Some information is missing. Please check and try again",
+      "noPhoto": "Please keep or upload at least 1 photo",
       "generic": "Couldn't save changes. Please try again later"
     }
   },

@@ -1,13 +1,13 @@
 import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Plus, Loader2, Lock, Search, MapPin, Pencil, AlertCircle } from 'lucide-react';
+import { X, Plus, Loader2, Search, MapPin, Pencil, AlertCircle, RotateCcw } from 'lucide-react';
 import type { AnimalType, CaseTag, LocationCoords, StrayReport } from '../types';
 import AddressAutocomplete from './AddressAutocomplete';
 import type { ResolvedAddress } from '../services/places';
 import { geocodeAddressQuery } from '../utils/location';
 import { getBrowserLanguage } from '../utils/locale';
 import { compressImage, uploadAnimalPhoto, PhotoError } from '../utils/imageCompressor';
-import { MAX_CASE_PHOTOS } from '../utils/casePhotos';
+import { MAX_CASE_PHOTOS, MAX_STORED_PHOTOS, getCasePhotos } from '../utils/casePhotos';
 import { CASE_TAGS, tagLabel, applyTagLine, stripTagLine, animalLabel } from '../utils/caseLabels';
 import { editCase } from '../services/caseService';
 import { getEditState } from '../utils/caseEdit';
@@ -29,8 +29,9 @@ const SERVER_CODES = new Set([
 const inputClass =
   'w-full px-3 py-2.5 text-sm bg-white border border-stone-200 rounded-lg placeholder:text-stone-400 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10';
 
+// animal-reports/{caseId}/{0-9}.jpg → 0–9；舊格式／唔啱格式回傳 null
 const pathIndex = (p: string): number | null => {
-  const m = /\/([0-4])\.jpg$/.exec(p);
+  const m = /\/([0-9])\.jpg$/.exec(p);
   return m ? Number(m[1]) : null;
 };
 
@@ -67,7 +68,7 @@ interface Props {
 
 const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
   const { t } = useTranslation();
-  const existing = report.photos ?? [];
+  const existing = getCasePhotos(report);
 
   const [animalType, setAnimalType] = useState<AnimalType>(report.animalType);
   const [customAnimalName, setCustomAnimalName] = useState(report.customAnimalName ?? '');
@@ -76,6 +77,8 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
   const [location, setLocation] = useState<LocationCoords>(report.location);
   const [addressInput, setAddressInput] = useState(report.location.address);
   const [pending, setPending] = useState<PendingPhoto[]>([]);
+  // 移走咗嘅舊相（只係唔再顯示；Storage 保留）
+  const [removed, setRemoved] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [searching, setSearching] = useState(false);
   const [statusKey, setStatusKey] = useState<string | null>(null);
@@ -85,22 +88,35 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
   const uploadedRef = useRef(new Map<string, string>());
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const kept = existing.filter((p) => !removed.has(p.path));
+  const removedList = existing.filter((p) => removed.has(p.path));
+
+  // 已經用咗嘅 Storage 位：所有舊相（包括移走咗嘅）+ 今次已上載嘅新相
   const usedSlots = new Set<number>(
     [...existing.map((p) => p.path), ...uploadedRef.current.values()]
       .map(pathIndex)
       .filter((n): n is number => n !== null)
   );
-  const freeSlots = [0, 1, 2, 3, 4].filter((i) => !usedSlots.has(i));
+  const freeSlots = Array.from({ length: MAX_STORED_PHOTOS }, (_, i) => i).filter((i) => !usedSlots.has(i));
   const notYetUploaded = pending.filter((p) => !uploadedRef.current.has(p.id));
-  const total = existing.length + pending.length;
+  const total = kept.length + pending.length;
   const canAdd = total < MAX_CASE_PHOTOS && notYetUploaded.length < freeSlots.length;
-  
-  console.log('[EditCase photos]', {
-  paths: existing.map((p) => p.path),
-  MAX_CASE_PHOTOS,
-  freeSlots,
-  canAdd,
-});
+
+  const removeExisting = (path: string) => {
+    setRemoved((prev) => new Set(prev).add(path));
+  };
+
+  const restoreExisting = (path: string) => {
+    if (total >= MAX_CASE_PHOTOS) {
+      alert(t('reportForm.photo.limitReached', { max: MAX_CASE_PHOTOS }));
+      return;
+    }
+    setRemoved((prev) => {
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
+  };
 
   const toggleTag = (tag: CaseTag) => {
     const next = tags.includes(tag) ? tags.filter((x) => x !== tag) : [...tags, tag];
@@ -124,6 +140,7 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
     setStatusKey('reportForm.progress.compressing');
     const added: PendingPhoto[] = [];
     let failed = 0;
+    // HEIC 唔好同時處理，逐張嚟
     for (const file of files.slice(0, room)) {
       try {
         const { blob, dataUrl } = await compressImage(file, 1280, 1280, 0.82);
@@ -160,6 +177,10 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
 
   const handleSave = async () => {
     setErrorKey(null);
+    if (total === 0) {
+      setErrorKey('editCase.errors.noPhoto');
+      return;
+    }
     if (!stripTagLine(description).trim()) {
       setErrorKey('reportForm.errors.noDescription');
       return;
@@ -168,19 +189,28 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
 
     setBusy(true);
     try {
-      // 新相逐張上載去空位
+      // 新相逐張上載去空位；個位已經有檔案（例如上次上載咗但未儲存）就試下一個位
       setStatusKey('editCase.uploading');
       const slots = [...freeSlots];
       for (const p of pending) {
         if (uploadedRef.current.has(p.id)) continue;
-        const slot = slots.shift();
-        if (slot === undefined) throw new PhotoError('photo.uploadFailed');
-        const r = await uploadAnimalPhoto(p.blob, report.id, slot, p.dataUrl);
-        uploadedRef.current.set(p.id, r.storagePath);
+        for (;;) {
+          const slot = slots.shift();
+          if (slot === undefined) throw new PhotoError('photo.uploadFailed');
+          try {
+            const r = await uploadAnimalPhoto(p.blob, report.id, slot, p.dataUrl);
+            uploadedRef.current.set(p.id, r.storagePath);
+            break;
+          } catch (err) {
+            if (slots.length === 0) throw err;
+            console.warn(`[EditCase] slot ${slot} upload failed, trying next`, err);
+          }
+        }
       }
       const newPhotoPaths = pending
         .map((p) => uploadedRef.current.get(p.id))
         .filter((x): x is string => !!x);
+      const keepPaths = kept.map((p) => p.path).filter((p) => pathIndex(p) !== null);
 
       setStatusKey('editCase.saving');
       const districtText = location.district || t('reportForm.location.districtPending');
@@ -194,6 +224,7 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
         tags: CASE_TAGS.filter((tag) => tags.includes(tag)),
         description: applyTagLine(description, tags).trim(),
         location,
+        keepPaths,
         newPhotoPaths,
         lang: getBrowserLanguage(),
       });
@@ -259,7 +290,7 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
           )}
         </div>
 
-        {/* 相片：舊相鎖住，只可以加新相 */}
+        {/* 相片：舊相可以移走（Storage 保留），再加新相；最多同時 5 張，第 1 張係封面 */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <p className="text-xs font-medium text-stone-700">{t('reportForm.photo.title')}</p>
@@ -269,20 +300,30 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
           </div>
           <input type="file" ref={fileRef} onChange={handleFiles} accept="image/*,.heic,.heif" multiple className="hidden" />
           <ul className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-            {existing.map((p, i) => (
-              <li key={p.path} className="relative aspect-square rounded-xl overflow-hidden bg-stone-100 border border-stone-200">
+            {kept.map((p, i) => (
+              <li key={p.path || p.url} className="relative aspect-square rounded-xl overflow-hidden bg-stone-100 border border-stone-200">
                 <img src={p.url} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-                <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-md bg-black/60 text-white text-3xs flex items-center gap-0.5">
-                  <Lock className="w-3 h-3" />
+                <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-md bg-black/60 text-white text-3xs">
                   {i === 0 ? t('reportForm.photo.cover') : t('editCase.oldPhoto')}
                 </span>
+                {pathIndex(p.path) !== null && (
+                  <button
+                    type="button"
+                    onClick={() => removeExisting(p.path)}
+                    disabled={busy}
+                    aria-label={t('reportForm.photo.remove')}
+                    className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </li>
             ))}
-            {pending.map((p) => (
+            {pending.map((p, i) => (
               <li key={p.id} className="relative aspect-square rounded-xl overflow-hidden bg-stone-100 border border-brand-300">
                 <img src={p.dataUrl} alt="" className="w-full h-full object-cover" />
                 <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-md bg-brand-500 text-white text-3xs">
-                  {t('editCase.newPhoto')}
+                  {kept.length === 0 && i === 0 ? t('reportForm.photo.cover') : t('editCase.newPhoto')}
                 </span>
                 {!uploadedRef.current.has(p.id) && (
                   <button
@@ -312,6 +353,30 @@ const EditCaseModal: React.FC<Props> = ({ report, onClose, onSaved }) => {
               </button>
             </li>
           </ul>
+
+          {/* 移走咗嘅舊相：可以還原 */}
+          {removedList.length > 0 && (
+            <div className="mt-3">
+              <p className="text-2xs text-stone-500 mb-1.5">{t('editCase.removedTitle')}</p>
+              <ul className="grid grid-cols-5 sm:grid-cols-8 gap-2">
+                {removedList.map((p) => (
+                  <li key={p.path} className="relative aspect-square rounded-lg overflow-hidden bg-stone-100 border border-stone-200">
+                    <img src={p.url} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover opacity-40 grayscale" />
+                    <button
+                      type="button"
+                      onClick={() => restoreExisting(p.path)}
+                      disabled={busy}
+                      aria-label={t('editCase.restorePhoto')}
+                      title={t('editCase.restorePhoto')}
+                      className="absolute inset-0 flex items-center justify-center text-stone-700 hover:bg-white/40 cursor-pointer"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         {/* 位置 */}

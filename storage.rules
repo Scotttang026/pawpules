@@ -1,7 +1,8 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // animal-reports/{caseId}/{0-4}.jpg（一宗案件一個資料夾，最多 5 張）
+    // animal-reports/{caseId}/{0-9}.jpg
+    // 報案用 0–4；報案人修改時新相放入空位（最多 10 個位，案件同時顯示最多 5 張）
     match /animal-reports/{caseId}/{fileName} {
       // getDownloadURL() 需要 get 權限；list 禁止，防止有人列出全部相片
       allow get: if true;
@@ -11,7 +12,7 @@ service firebase.storage {
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType == 'image/jpeg'
         && caseId.matches('^PW-[A-Z0-9]{1,20}-[A-Z0-9]{1,8}$')
-        && fileName.matches('^[0-4][.]jpg$');
+        && fileName.matches('^[0-9][.]jpg$');
       allow update, delete: if false;
     }
 

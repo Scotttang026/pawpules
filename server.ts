@@ -168,7 +168,9 @@ const CASE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const UID_RE = /^[A-Za-z0-9]{1,128}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FRESH_CASE_WINDOW_MS = 15 * 60 * 1000; // 案件建立後 15 分鐘內先可以做 AI 分析、寄信、報案人派送
-const MAX_CASE_PHOTOS = 5;
+const MAX_CASE_PHOTOS = 5;     // 案件同時顯示最多 5 張
+const MAX_STORED_PHOTOS = 10;  // Storage 每宗案件最多 10 個位（0–9.jpg）：報案 5 + 修改 5
+const PHOTO_FILE_RE = /^[0-9]\.jpg$/;
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const MAX_NGO_ACCOUNTS = 5; // 每間機構最多幾多個登入帳戶
 const EDIT_WINDOW_MS = 24 * 60 * 60 * 1000; // 報案人 24 小時內可以改
@@ -183,7 +185,7 @@ const CONTACT_CATEGORIES = new Set(["update", "delete", "photo", "status", "othe
 function casePhotoPaths(caseId: string, data: Record<string, any> | undefined): string[] {
   const folder = `animal-reports/${caseId}/`;
   const isOwn = (p: unknown): p is string =>
-    typeof p === "string" && p.startsWith(folder) && /^[0-4]\.jpg$/.test(p.slice(folder.length));
+    typeof p === "string" && p.startsWith(folder) && PHOTO_FILE_RE.test(p.slice(folder.length));
 
   const list: string[] = Array.isArray(data?.photos)
     ? data!.photos.map((x: any) => x?.path).filter(isOwn)
@@ -795,7 +797,7 @@ app.post("/api/upload-photo", uploadRateLimitMiddleware, async (req: Request, re
     }
 
     const idx = Number(index);
-    if (!Number.isInteger(idx) || idx < 0 || idx >= MAX_CASE_PHOTOS) {
+    if (!Number.isInteger(idx) || idx < 0 || idx >= MAX_STORED_PHOTOS) {
       res.status(400).json({ error: errMsg(req, "badPhotoIndex") });
       return;
     }
@@ -1741,7 +1743,8 @@ app.post("/api/cases/:caseId/status", caseActionRateLimitMiddleware, async (req:
 });
 
 // ---------- 報案人修改案件（5B-1）----------
-// 舊相全部保留；新相只可以放喺同一個資料夾嘅空位（0–4.jpg），總數最多 5 張
+// 報案人可以移走舊相（Storage 保留，原本嗰版存喺 private/firstVersion），再加新相
+// 新相放喺同一個資料夾嘅空位（0–9.jpg）；案件同時最多顯示 5 張，第 1 張係封面
 
 // 報案人 = usercases/{uid} 有呢宗案件，或者報案時登入咗嘅 uid
 async function isCaseReporter(uid: string, caseId: string): Promise<boolean> {
@@ -1784,6 +1787,7 @@ async function storedPhotoEntry(
     return null;
   }
 }
+type PhotoEntry = { url: string; path: string };
 
 app.post("/api/cases/:caseId/edit", caseActionRateLimitMiddleware, async (req: Request, res: Response) => {
   const caseId = String(req.params.caseId ?? "");
@@ -1812,21 +1816,25 @@ app.post("/api/cases/:caseId/edit", caseActionRateLimitMiddleware, async (req: R
     : [];
   const location = cleanLocation(b.location);
   const rawPaths: unknown[] = Array.isArray(b.newPhotoPaths) ? b.newPhotoPaths : [];
+  // keepPaths：保留嘅舊相（次序 = 新次序）；舊版前端冇傳就全部保留
+  const rawKeep: unknown[] | null = Array.isArray(b.keepPaths) ? b.keepPaths : null;
 
-  if (!title || !description || !animalType || !location || rawPaths.length > MAX_CASE_PHOTOS) {
+  if (
+    !title || !description || !animalType || !location ||
+    rawPaths.length > MAX_CASE_PHOTOS ||
+    (rawKeep !== null && rawKeep.length > MAX_CASE_PHOTOS)
+  ) {
     res.status(400).json({ error: "bad_input", code: "bad_input" });
     return;
   }
 
   const folder = `animal-reports/${caseId}/`;
-  const newPaths = Array.from(
-    new Set(
-      rawPaths.filter(
-        (p): p is string => typeof p === "string" && p.startsWith(folder) && /^[0-4]\.jpg$/.test(p.slice(folder.length))
-      )
-    )
-  );
-  if (newPaths.length !== rawPaths.length) {
+  const isOwnPath = (p: unknown): p is string =>
+    typeof p === "string" && p.startsWith(folder) && PHOTO_FILE_RE.test(p.slice(folder.length));
+
+  const newPaths = Array.from(new Set(rawPaths.filter(isOwnPath)));
+  const keepPaths = rawKeep === null ? null : Array.from(new Set(rawKeep.filter(isOwnPath)));
+  if (newPaths.length !== rawPaths.length || (keepPaths !== null && keepPaths.length !== rawKeep!.length)) {
     res.status(400).json({ error: "bad_photos", code: "bad_photos" });
     return;
   }
@@ -1843,6 +1851,7 @@ app.post("/api/cases/:caseId/edit", caseActionRateLimitMiddleware, async (req: R
       res.status(400).json({ error: "bad_photos", code: "bad_photos" });
       return;
     }
+    const added = newEntries as PhotoEntry[];
 
     const db = getAdminDb();
     const caseRef = db.collection("case").doc(caseId);
@@ -1857,19 +1866,27 @@ app.post("/api/cases/:caseId/edit", caseActionRateLimitMiddleware, async (req: R
       if (!created || Date.now() - created > EDIT_WINDOW_MS) return { code: "edit_expired" as const };
       if ((Number(d.editCount) || 0) >= MAX_REPORTER_EDITS) return { code: "edit_used" as const };
 
-      // 舊相全部保留（次序不變，封面不變）
+      // 目前案件嘅相（只信屬於呢宗案件資料夾嘅路徑）
       const ownPaths = casePhotoPaths(caseId, d);
-      const keep = (Array.isArray(d.photos) ? d.photos : [])
+      const current: PhotoEntry[] = (Array.isArray(d.photos) ? d.photos : [])
         .filter((p: any) => typeof p?.url === "string" && ownPaths.includes(p?.path))
         .map((p: any) => ({ url: p.url as string, path: p.path as string }));
-      const added = newEntries as { url: string; path: string }[];
-      if (added.some((a) => keep.some((k: { path: string }) => k.path === a.path)) || keep.length + added.length > MAX_CASE_PHOTOS) {
-        return { code: "bad_photos" as const };
-      }
-      const photos = [...keep, ...added];
-      if (photos.length === 0) return { code: "bad_photos" as const };
 
-      // 第 1 版放 private（只有 admin／接手 NGO 讀到）
+      // 保留邊幾張：一定要係目前案件已有嘅相
+      const keep: PhotoEntry[] = [];
+      for (const p of keepPaths ?? current.map((c) => c.path)) {
+        const hit = current.find((c) => c.path === p);
+        if (!hit) return { code: "bad_photos" as const };
+        keep.push(hit);
+      }
+
+      // 新相唔可以用返目前案件任何一張相嘅路徑（包括移走咗嗰啲）
+      if (added.some((a) => current.some((c) => c.path === a.path))) return { code: "bad_photos" as const };
+
+      const photos = [...keep, ...added];
+      if (photos.length === 0 || photos.length > MAX_CASE_PHOTOS) return { code: "bad_photos" as const };
+
+      // 第 1 版放 private（只有 admin／接手 NGO 讀到）；photos 記低原本全部相
       tx.set(caseRef.collection("private").doc("firstVersion"), {
         title: d.title ?? null,
         animalType: d.animalType ?? null,
@@ -1877,7 +1894,7 @@ app.post("/api/cases/:caseId/edit", caseActionRateLimitMiddleware, async (req: R
         tags: d.tags ?? null,
         description: d.description ?? null,
         location: d.location ?? null,
-        photos: keep,
+        photos: current,
         photoUrl: d.photoUrl ?? null,
         storagePath: d.storagePath ?? null,
         urgency: d.urgency ?? null,
@@ -1903,7 +1920,7 @@ app.post("/api/cases/:caseId/edit", caseActionRateLimitMiddleware, async (req: R
         urgency: "P1",
         updatedAt: FieldValue.serverTimestamp(),
       });
-      return { code: "ok" as const, photos };
+      return { code: "ok" as const, photos, removed: current.length - keep.length };
     });
 
     if (outcome.code !== "ok") {
@@ -1931,7 +1948,9 @@ app.post("/api/cases/:caseId/edit", caseActionRateLimitMiddleware, async (req: R
       console.warn(`[Edit] 已達每日 AI 上限 ${AI_DAILY_LIMIT}，案件 ${caseId} 修改後未分析`);
     }
 
-    console.log(`[Edit] case ${caseId} edited by reporter ${authInfo.uid} (+${newPaths.length} photos)`);
+    console.log(
+      `[Edit] case ${caseId} edited by reporter ${authInfo.uid} (+${newPaths.length} / -${outcome.removed} photos)`
+    );
     res.json({ success: true, urgency: analysis?.urgencyLevel ?? "P1", noResponse: !analysis });
   } catch (err) {
     console.error("[Edit] error:", (err as any)?.code, (err as Error).message);
