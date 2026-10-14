@@ -262,17 +262,31 @@ function getMailer(): Transporter | null {
   return mailer;
 }
 
-async function sendMail(to: string, subject: string, text: string): Promise<{ simulated: boolean }> {
+const MAIL_FROM_NAME = (process.env.MAIL_FROM_NAME || "PawPulse 管理員").trim();
+
+async function sendMail(
+  to: string,
+  subject: string,
+  text: string,
+  opts: { replyTo?: string } = {}
+): Promise<{ simulated: boolean }> {
   const m = getMailer();
   if (!m) {
     // ⚠️ 只係本機測試用：內容（包括設定密碼連結）會印喺 log，正式環境一定要設定 GMAIL_*
     console.log(`[EMAIL - SIMULATED] → ${maskEmail(to)} | ${subject}\n${text}\n`);
     return { simulated: true };
   }
-  await m.sendMail({ from: `"PawPulse" <${GMAIL_USER}>`, to, subject, text });
+  await m.sendMail({
+    from: { name: MAIL_FROM_NAME, address: GMAIL_USER },
+    to,
+    subject,
+    text,
+    ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+  });
   console.log(`[EMAIL] sent → ${maskEmail(to)} | ${subject}`);
   return { simulated: false };
 }
+
 
 // ---------- 登入身份 ----------
 // admin：Firestore 有 adminuser/{uid} 文件
@@ -2303,7 +2317,13 @@ app.post("/api/cases/:caseId/contact-admin", emailIpRateLimitMiddleware, async (
           "案件連結：",
           link,
         ].join("\n");
-        await sendMail(to.join(", "), `[PawPulse] 聯絡管理員（${CONTACT_CATEGORY_ZH[category] ?? category}）：${caseId}`, text);
+                const replyTo = authInfo.email && EMAIL_RE.test(authInfo.email) ? authInfo.email : undefined;
+        await sendMail(
+          to.join(", "),
+          `[PawPulse] 聯絡管理員（${CONTACT_CATEGORY_ZH[category] ?? category}）：${caseId}`,
+          text,
+          { replyTo }
+        );
       }
     } catch (err) {
       console.error("[ContactAdmin] email failed:", (err as Error).message);
