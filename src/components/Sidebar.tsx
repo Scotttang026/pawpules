@@ -1,5 +1,5 @@
 // src/components/Sidebar.tsx
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   PawPrint, MapPin, LayoutList, Building2, ShieldCheck, ShieldAlert, HeartPulse,
   LogIn, LogOut, ClipboardList, Briefcase,
@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import type { User } from 'firebase/auth';
 import { useAuth } from '../contexts/AuthContext';
 import type { UserRole } from '../types';
+import { subscribeToMyUnread } from '../services/caseService'; // 新增
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { ConfirmDialog } from './ConfirmDialog';
 
@@ -78,6 +79,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onOpe
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const closeLogoutConfirm = useCallback(() => setConfirmingLogout(false), []);
 
+  // 新增：報案人未讀留言總數（即時更新，只有普通用戶先讀）
+  const [unreadCount, setUnreadCount] = useState(0);
+  const uid = user?.uid ?? null;
+  useEffect(() => {
+    if (!uid || role !== 'user') {
+      setUnreadCount(0);
+      return;
+    }
+    return subscribeToMyUnread(uid, (map) => {
+      const total = Object.values(map).reduce((sum, u) => sum + (u?.count ?? 0), 0);
+      setUnreadCount(total);
+    });
+  }, [uid, role]);
+
+  /** 新增：每個分頁要顯示嘅數字（0 = 唔顯示） */
+  const badgeCountFor = (tab: AppTab): number => {
+    if (tab === 'cases') return urgentCount;
+    if (tab === 'mycases') return unreadCount;
+    return 0;
+  };
+
   const roleItem = role ? ROLE_NAV_ITEM[role] : null;
   const navItems = roleItem ? [...PUBLIC_NAV_ITEMS, roleItem] : PUBLIC_NAV_ITEMS;
 
@@ -95,6 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onOpe
 
   const renderRailTab = ({ tab, labelKey, icon: Icon }: NavItem) => {
     const active = currentTab === tab;
+    const count = badgeCountFor(tab);
     return (
       <button
         key={tab}
@@ -108,7 +131,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onOpe
       >
         <span className="relative">
           <Icon className={`w-5 h-5 ${active ? 'text-brand-500' : ''}`} strokeWidth={active ? 2.2 : 1.8} />
-          {tab === 'cases' && urgentCount > 0 && <Badge count={urgentCount} />}
+          {count > 0 && <Badge count={count} />}
         </span>
         <span className={`max-w-full px-1 truncate text-2xs ${active ? 'font-semibold' : 'font-medium'}`}>
           {t(labelKey)}
@@ -119,6 +142,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onOpe
 
   const renderMobileTab = ({ tab, labelKey, icon: Icon }: NavItem) => {
     const active = currentTab === tab;
+    const count = badgeCountFor(tab);
     return (
       <button
         key={tab}
@@ -128,7 +152,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onOpe
       >
         <span className="relative">
           <Icon className={`w-5 h-5 ${active ? 'text-brand-500' : ''}`} strokeWidth={active ? 2.2 : 1.8} />
-          {tab === 'cases' && urgentCount > 0 && <Badge count={urgentCount} ringClass="ring-white" />}
+          {count > 0 && <Badge count={count} ringClass="ring-white" />}
         </span>
         <span className={`w-full px-0.5 truncate text-center text-2xs ${active ? 'font-semibold' : 'font-medium'}`}>
           {t(labelKey)}
